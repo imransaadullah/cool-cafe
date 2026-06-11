@@ -274,7 +274,7 @@ class SetupWizard(QMainWindow):
         server_url = self.server_url_input.text().strip()
         
         try:
-            response = requests.get(f"{server_url}/api/health", timeout=5)
+            response = requests.get(f"{server_url}/api/health", timeout=10)
             if response.status_code == 200:
                 self.connection_status.setText("✅ Connected to server")
                 self.connection_status.setStyleSheet("color: green;")

@@ -44,6 +44,9 @@ class SetupWizard(QMainWindow):
         self.static_code = None
         self.recovery_combo = None
         
+        # Callback to launch lock screen after setup
+        self.lock_screen_callback = None
+        
         self.setup_ui()
     
     def setup_ui(self):
@@ -371,9 +374,8 @@ class SetupWizard(QMainWindow):
     def start_client(self):
         """Start the main client."""
         self.close()
-        # Import and start main client
-        from main import main
-        main()
+        if self.lock_screen_callback:
+            self.lock_screen_callback()
 
 
 def check_first_run() -> bool:

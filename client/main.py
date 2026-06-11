@@ -10,21 +10,8 @@ from services.config_manager import client_config
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
-def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("CyberCafe Client")
-    app.setOrganizationName("CyberCafe")
-    
-    # Check if first run - show setup wizard
-    if check_first_run():
-        wizard = SetupWizard()
-        wizard.show()
-        sys.exit(app.exec())
-    
-    # Get UI settings from config
-    theme = client_config.get("ui.theme", "dark")
-    
-    # Set application-wide style
+def apply_theme(app, theme="dark"):
+    """Apply the application theme."""
     if theme == "dark":
         app.setStyleSheet("""
             QMainWindow {
@@ -95,21 +82,38 @@ def main():
                 background-color: #004094;
             }
         """)
-    
-    # Create and show lock screen
+
+
+def show_lock_screen(app):
+    """Create and show the lock screen."""
+    theme = client_config.get("ui.theme", "dark")
+    apply_theme(app, theme)
+
     lock_screen = LockScreen()
-    
-    # Set window flags based on config
+
     if client_config.get("ui.always_on_top", True):
         lock_screen.setWindowFlags(
             lock_screen.windowFlags() | Qt.WindowType.WindowStaysOnTopHint
         )
-    
+
     if client_config.get("ui.fullscreen", True):
         lock_screen.showFullScreen()
     else:
         lock_screen.show()
-    
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("CyberCafe Client")
+    app.setOrganizationName("CyberCafe")
+
+    if check_first_run():
+        wizard = SetupWizard()
+        wizard.lock_screen_callback = lambda: show_lock_screen(app)
+        wizard.show()
+    else:
+        show_lock_screen(app)
+
     sys.exit(app.exec())
 
 

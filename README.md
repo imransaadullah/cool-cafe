@@ -178,8 +178,7 @@ python main.py
 ```bash
 # 1. Build the executable (on build machine)
 cd client
-pip install -r requirements.txt
-pip install pyinstaller
+pip install -r requirements-build.txt
 pyinstaller build.spec
 
 # 2. Copy dist/CyberCafe Client/ folder to target PC

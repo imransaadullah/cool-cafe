@@ -148,6 +148,87 @@ cd deploy/bare_metal
 sudo ./install.sh
 ```
 
+### Client-Only Setup (Per PC)
+
+Use this when the server is already running and you only need to install the client on user PCs.
+
+**Requirements:**
+- Windows 10/11
+- Python 3.11+ (or pre-built executable)
+- Network access to the server
+
+**Option 1: Run from source**
+
+```bash
+# 1. Copy the client folder to the PC
+# 2. Install dependencies
+cd client
+pip install -r requirements.txt
+
+# 3. Configure server address
+# Edit config.json and set server_url to your server IP
+# Example: "server_url": "http://192.168.1.100:8000"
+
+# 4. Run the client
+python main.py
+```
+
+**Option 2: Build standalone executable**
+
+```bash
+# 1. Build the executable (on build machine)
+cd client
+pip install -r requirements.txt
+pip install pyinstaller
+pyinstaller build.spec
+
+# 2. Copy dist/CyberCafe Client/ folder to target PC
+
+# 3. Edit config.json in the folder with server URL
+
+# 4. Run CyberCafe Client.exe
+```
+
+**Option 3: Install as Windows Service (auto-start)**
+
+```bash
+# 1. Build or install the client (see above)
+
+# 2. Install watchdog service (run as Administrator)
+cd client/services
+install_watchdog.bat
+
+# 3. Client now starts automatically on boot
+```
+
+**Client Configuration (config.json)**
+
+```json
+{
+  "server_url": "http://192.168.1.100:8000",
+  "pc_id": 1,
+  "branch_id": 1,
+  "heartbeat_interval": 5,
+  "offline_mode": false,
+  "ui": {
+    "fullscreen": true,
+    "always_on_top": true,
+    "theme": "dark"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| server_url | URL of the local server |
+| pc_id | PC number (must match server config) |
+| branch_id | Branch ID (for multi-branch setups) |
+| heartbeat_interval | Seconds between heartbeat checks |
+| offline_mode | Allow offline operation |
+| ui.fullscreen | Run in fullscreen mode |
+| ui.always_on_top | Keep window on top |
+| ui.theme | "dark" or "light" |
+
 ### Windows Client
 
 1. Build the client:

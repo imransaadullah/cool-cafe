@@ -3,6 +3,7 @@ import os
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from ui.lock_screen import LockScreen
+from ui.setup_wizard import SetupWizard, check_first_run
 from services.config_manager import client_config
 
 # Add parent directory to path for shared imports
@@ -13,6 +14,12 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("CyberCafe Client")
     app.setOrganizationName("CyberCafe")
+    
+    # Check if first run - show setup wizard
+    if check_first_run():
+        wizard = SetupWizard()
+        wizard.show()
+        sys.exit(app.exec())
     
     # Get UI settings from config
     theme = client_config.get("ui.theme", "dark")

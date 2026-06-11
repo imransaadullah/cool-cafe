@@ -41,6 +41,7 @@ const menuItems = [
   { name: 'PCs', path: '/pcs', icon: '🖥️' },
   { name: 'Sessions', path: '/sessions', icon: '⏰' },
   { name: 'Codes', path: '/codes', icon: '🔑' },
+  { name: 'Security', path: '/security', icon: '🛡️' },
   { name: 'Reports', path: '/reports', icon: '📈' },
   { name: 'Branches', path: '/branches', icon: '🏢' },
   { name: 'Settings', path: '/settings', icon: '⚙️' },

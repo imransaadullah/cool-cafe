@@ -31,6 +31,8 @@ model Branch {
   payments        Payment[]
   revenueReports  RevenueReport[]
   filterRules     FilterRule[]
+  masterCodes     MasterCode[]
+  auditLogs       SecurityAuditLog[]
 
   @@map("branches")
 }
@@ -53,6 +55,7 @@ model Admin {
   createdBy     Admin?    @relation("AdminHierarchy", fields: [createdById], references: [id])
   createdAdmins Admin[]   @relation("AdminHierarchy")
   codeBatches   CodeBatch[]
+  masterCodes   MasterCode[]
 
   @@map("admins")
 }
@@ -72,9 +75,28 @@ model PC {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
+  // Security fields
+  isBanned              Boolean   @default(false) @map("is_banned")
+  clientRunning         Boolean   @default(false) @map("client_running")
+  staticMasterCode      String?   @unique @map("static_master_code")
+  staticCodeUsedAt      DateTime? @map("static_code_used_at")
+  recoveryKeyCombo      String?   @map("recovery_key_combo")
+  wrongCodeAttempts     Int       @default(0) @map("wrong_code_attempts")
+  isAlarming            Boolean   @default(false) @map("is_alarming")
+  lastBypassAt          DateTime? @map("last_bypass_at")
+  lastAlarmAt           DateTime? @map("last_alarm_at")
+
+  // Config fields
+  autoStartEnabled      Boolean   @default(true) @map("auto_start_enabled")
+  runAsService          Boolean   @default(false) @map("run_as_service")
+  alarmEnabled          Boolean   @default(true) @map("alarm_enabled")
+  alarmColor            String?   @default("#FF0000") @map("alarm_color")
+
   branch          Branch?   @relation(fields: [branchId], references: [id])
   currentSession  Session?  @relation("PCCurrentSession", fields: [currentSessionId], references: [id])
   sessions        Session[] @relation("PCSessions")
+  masterCodes     MasterCode[]
+  auditLogs       SecurityAuditLog[]
 
   @@map("pcs")
 }
@@ -227,4 +249,38 @@ model OfflineQueue {
   createdAt     DateTime  @default(now()) @map("created_at")
 
   @@map("offline_queue")
+}
+
+model MasterCode {
+  id              Int       @id @default(autoincrement())
+  code            String    @unique
+  pcId            Int       @map("pc_id")
+  branchId        Int       @map("branch_id")
+  createdBy       Int       @map("created_by_id")
+  durationMinutes Float     @default(60) @map("duration_minutes")
+  isUsed          Boolean   @default(false) @map("is_used")
+  usedAt          DateTime? @map("used_at")
+  expiresAt       DateTime? @map("expires_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  pc          PC      @relation(fields: [pcId], references: [id])
+  creator     Admin   @relation(fields: [createdBy], references: [id])
+  branch      Branch  @relation(fields: [branchId], references: [id])
+
+  @@map("master_codes")
+}
+
+model SecurityAuditLog {
+  id            Int       @id @default(autoincrement())
+  pcId          Int?      @map("pc_id")
+  branchId      Int       @map("branch_id")
+  eventType     String    @map("event_type")
+  details       Json?
+  ipAddress     String?   @map("ip_address")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  pc          PC?     @relation(fields: [pcId], references: [id])
+  branch      Branch  @relation(fields: [branchId], references: [id])
+
+  @@map("security_audit_logs")
 }

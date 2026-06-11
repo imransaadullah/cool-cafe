@@ -1,10 +1,11 @@
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from shared.config import settings
-from shared.database import db
-from .routes import auth, pcs, sessions, codes, dashboard, filter_rules, payments, content_filter, webhooks, branches
+from ..shared.config import settings
+from ..shared.database import db
+from .routes import auth, pcs, sessions, codes, dashboard, filter_rules, payments, content_filter, webhooks, master_codes, branches
 from .websocket import websocket_endpoint, manager
 from .middleware import ErrorHandlerMiddleware, RequestLoggingMiddleware
+from .services.audit import audit_logger
 import sys
 import os
 import logging
@@ -50,6 +51,7 @@ app.include_router(filter_rules.router, prefix="/api/filters", tags=["Filter Rul
 app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 app.include_router(content_filter.router, prefix="/api/content-filter", tags=["Content Filter"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
+app.include_router(master_codes.router, prefix="/api/master-codes", tags=["Master Codes"])
 app.include_router(branches.router, prefix="/api/branches", tags=["Branches"])
 
 
@@ -57,12 +59,14 @@ app.include_router(branches.router, prefix="/api/branches", tags=["Branches"])
 async def startup_event():
     logger.info("Starting local server...")
     await db.connect()
+    await audit_logger.connect()
     logger.info("Database connected")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Shutting down local server...")
+    await audit_logger.disconnect()
     await db.disconnect()
     logger.info("Database disconnected")
 

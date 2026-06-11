@@ -22,9 +22,9 @@
           </div>
           <span
             class="px-2 py-1 rounded-full text-xs"
-            :class="getStatusClass(pc.status)"
+            :class="getStatusClass(pc)"
           >
-            {{ pc.status }}
+            {{ getStatusText(pc) }}
           </span>
         </div>
         
@@ -34,18 +34,46 @@
             <span>{{ pc.ip_address || 'N/A' }}</span>
           </div>
           <div class="flex justify-between">
-            <span class="text-gray-500">Last Heartbeat:</span>
-            <span>{{ formatDate(pc.last_heartbeat_at) }}</span>
+            <span class="text-gray-500">Client Running:</span>
+            <span :class="pc.client_running ? 'text-green-600' : 'text-red-600'">
+              {{ pc.client_running ? 'Yes' : 'No' }}
+            </span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-500">Session:</span>
+            <span v-if="pc.has_active_session" class="text-green-600">
+              Active ({{ formatTime(pc.time_left) }} left)
+            </span>
+            <span v-else class="text-gray-500">None</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-500">Banned:</span>
+            <span :class="pc.is_banned ? 'text-red-600 font-bold' : 'text-gray-500'">
+              {{ pc.is_banned ? 'YES' : 'No' }}
+            </span>
           </div>
         </div>
         
         <div class="mt-4 pt-4 border-t flex justify-end space-x-2">
           <button
-            @click.stop="toggleStatus(pc)"
-            class="text-sm px-3 py-1 rounded"
-            :class="pc.is_active ? 'bg-danger-100 text-danger-600' : 'bg-success-100 text-success-600'"
+            v-if="!pc.is_banned"
+            @click.stop="banPC(pc)"
+            class="text-sm px-3 py-1 rounded bg-red-100 text-red-600"
           >
-            {{ pc.is_active ? 'Disable' : 'Enable' }}
+            Ban
+          </button>
+          <button
+            v-else
+            @click.stop="unbanPC(pc)"
+            class="text-sm px-3 py-1 rounded bg-green-100 text-green-600"
+          >
+            Unban
+          </button>
+          <button
+            @click.stop="generateMasterCode(pc)"
+            class="text-sm px-3 py-1 rounded bg-blue-100 text-blue-600"
+          >
+            Generate Code
           </button>
         </div>
       </div>
@@ -127,6 +155,53 @@
         </form>
       </div>
     </div>
+    
+    <!-- Master Code Modal -->
+    <div
+      v-if="showMasterCodeModal"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+    >
+      <div class="card w-full max-w-md">
+        <h2 class="text-xl font-semibold mb-4">Generate Master Code</h2>
+        
+        <div class="mb-4">
+          <p class="text-gray-600 mb-2">PC #{{ selectedPCForCode?.pc_number }} - {{ selectedPCForCode?.name }}</p>
+          <label class="block text-sm font-medium text-gray-700 mb-2">
+            Duration (minutes)
+          </label>
+          <input
+            v-model.number="codeDuration"
+            type="number"
+            class="input"
+            min="1"
+            max="480"
+          />
+        </div>
+        
+        <div v-if="generatedCode" class="bg-green-50 border border-green-200 p-4 rounded mb-4">
+          <p class="text-sm text-green-700">Generated Code:</p>
+          <p class="text-2xl font-mono font-bold text-green-800">{{ generatedCode }}</p>
+          <p class="text-xs text-green-600">Expires in {{ codeDuration }} minutes</p>
+        </div>
+        
+        <div class="flex justify-end space-x-2">
+          <button
+            type="button"
+            @click="showMasterCodeModal = false"
+            class="px-4 py-2 text-gray-600 hover:text-gray-800"
+          >
+            Close
+          </button>
+          <button
+            v-if="!generatedCode"
+            @click="generateCode"
+            class="btn btn-primary"
+          >
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -137,6 +212,10 @@ import api from '@/services/api'
 const pcs = ref([])
 const showAddModal = ref(false)
 const editingPC = ref(null)
+const showMasterCodeModal = ref(false)
+const selectedPCForCode = ref(null)
+const codeDuration = ref(60)
+const generatedCode = ref('')
 
 const formData = ref({
   name: '',
@@ -148,26 +227,37 @@ const formData = ref({
 
 const fetchPCs = async () => {
   try {
-    const response = await api.get('/api/pcs/')
+    const response = await api.get('/api/pcs/status')
     pcs.value = response.data
   } catch (error) {
     console.error('Failed to fetch PCs:', error)
   }
 }
 
-const getStatusClass = (status) => {
-  const classes = {
-    online: 'bg-success-100 text-success-700',
-    in_use: 'bg-warning-100 text-warning-700',
-    offline: 'bg-gray-100 text-gray-700',
-    maintenance: 'bg-danger-100 text-danger-700',
-  }
-  return classes[status] || 'bg-gray-100 text-gray-700'
+const getStatusClass = (pc) => {
+  if (pc.is_alarming) return 'bg-red-100 text-red-700'
+  if (pc.is_banned) return 'bg-orange-100 text-orange-700'
+  if (!pc.client_running) return 'bg-yellow-100 text-yellow-700'
+  if (pc.has_active_session) return 'bg-green-100 text-green-700'
+  return 'bg-gray-100 text-gray-700'
+}
+
+const getStatusText = (pc) => {
+  if (pc.is_alarming) return 'ALARM'
+  if (pc.is_banned) return 'BANNED'
+  if (!pc.client_running) return 'APP NOT RUNNING'
+  if (pc.has_active_session) return 'ACTIVE'
+  return 'IDLE'
 }
 
 const formatDate = (dateStr) => {
   if (!dateStr) return 'Never'
   return new Date(dateStr).toLocaleString()
+}
+
+const formatTime = (seconds) => {
+  const mins = Math.floor(seconds / 60)
+  return `${mins} min`
 }
 
 const editPC = (pc) => {
@@ -201,12 +291,42 @@ const savePC = async () => {
   }
 }
 
-const toggleStatus = async (pc) => {
+const banPC = async (pc) => {
+  const reason = prompt('Enter reason for ban (optional):')
+  
   try {
-    await api.put(`/api/pcs/${pc.id}`, { is_active: !pc.is_active })
+    await api.post(`/api/pcs/${pc.id}/ban`, { reason })
     fetchPCs()
   } catch (error) {
-    console.error('Failed to toggle PC status:', error)
+    console.error('Failed to ban PC:', error)
+  }
+}
+
+const unbanPC = async (pc) => {
+  try {
+    await api.post(`/api/pcs/${pc.id}/unban`)
+    fetchPCs()
+  } catch (error) {
+    console.error('Failed to unban PC:', error)
+  }
+}
+
+const generateMasterCode = (pc) => {
+  selectedPCForCode.value = pc
+  codeDuration.value = 60
+  generatedCode.value = ''
+  showMasterCodeModal.value = true
+}
+
+const generateCode = async () => {
+  try {
+    const response = await api.post('/api/master-codes/generate', {
+      pc_id: selectedPCForCode.value.id,
+      duration_minutes: codeDuration.value,
+    })
+    generatedCode.value = response.data.code
+  } catch (error) {
+    console.error('Failed to generate code:', error)
   }
 }
 

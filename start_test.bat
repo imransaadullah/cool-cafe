@@ -15,7 +15,7 @@ echo Starting services...
 echo.
 
 REM Start Local Server
-start "CyberCafe Server" cmd /k "cd /d %~dp0 && python -m uvicorn local_server.app.main:app --reload --port 8000"
+start "CyberCafe Server" cmd /k "cd /d %~dp0 && python -m uvicorn local_server.app.main:app --reload --host 0.0.0.0 --port 8000"
 timeout /t 3 /nobreak >nul
 
 REM Start Dashboard

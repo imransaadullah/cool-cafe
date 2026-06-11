@@ -4,6 +4,7 @@ First-time configuration wizard for the client
 """
 
 import sys
+import socket
 import requests
 import secrets
 import string
@@ -16,6 +17,18 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
 from services.config_manager import client_config
+
+
+def get_local_ip():
+    """Get the local IP address on the LAN."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
 
 
 class SetupWizard(QMainWindow):
@@ -86,10 +99,18 @@ class SetupWizard(QMainWindow):
         step_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         layout.addWidget(step_label)
         
+        # Auto-detect local IP
+        local_ip = get_local_ip()
+        
         # Server URL
         layout.addWidget(QLabel("Server URL:"))
-        self.server_url_input = QLineEdit(client_config.get_server_url())
+        self.server_url_input = QLineEdit(f"http://{local_ip}:8000")
         layout.addWidget(self.server_url_input)
+        
+        # Auto-detect info
+        detect_label = QLabel(f"Detected local IP: {local_ip}")
+        detect_label.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addWidget(detect_label)
         
         # Test connection button
         self.test_btn = QPushButton("Test Connection")
@@ -357,4 +378,5 @@ class SetupWizard(QMainWindow):
 
 def check_first_run() -> bool:
     """Check if this is first run (no config)."""
-    return not client_config.get("server_url") or client_config.get("server_url") == "http://localhost:8000"
+    server_url = client_config.get("server_url", "")
+    return not server_url or server_url == "http://localhost:8000" or server_url == ""

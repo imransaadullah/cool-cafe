@@ -5,8 +5,7 @@ Handles generation, validation, and management of master codes
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from prisma import Prisma
-from ...shared.database import get_db
-from ...shared.utils.auth import get_password_hash
+from shared.database import get_db
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta

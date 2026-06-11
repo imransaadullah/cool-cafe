@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from ..shared.config import settings
-from ..shared.database import db
+from shared.config import settings
+from shared.database import db
 from .routes import auth, pcs, sessions, codes, dashboard, filter_rules, payments, content_filter, webhooks, master_codes, branches
 from .websocket import websocket_endpoint, manager
 from .middleware import ErrorHandlerMiddleware, RequestLoggingMiddleware
@@ -59,14 +59,13 @@ app.include_router(branches.router, prefix="/api/branches", tags=["Branches"])
 async def startup_event():
     logger.info("Starting local server...")
     await db.connect()
-    await audit_logger.connect()
+    audit_logger.connect(db.client)
     logger.info("Database connected")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Shutting down local server...")
-    await audit_logger.disconnect()
     await db.disconnect()
     logger.info("Database disconnected")
 

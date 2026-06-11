@@ -8,6 +8,9 @@ from PyQt6.QtWidgets import (
     QWidget,
     QStackedWidget,
     QMessageBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
@@ -92,6 +95,21 @@ class LockScreen(QMainWindow):
         self.code_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.code_status_label.setStyleSheet("color: #ff6b6b;")
         layout.addWidget(self.code_status_label)
+        
+        # Bottom buttons
+        bottom_layout = QHBoxLayout()
+        
+        # Settings button
+        settings_btn = QPushButton("Settings")
+        settings_btn.clicked.connect(self.open_settings)
+        bottom_layout.addWidget(settings_btn)
+        
+        # Exit button (only visible when no session)
+        self.exit_btn = QPushButton("Exit")
+        self.exit_btn.clicked.connect(self.close)
+        bottom_layout.addWidget(self.exit_btn)
+        
+        layout.addLayout(bottom_layout)
         
         self.stack.addWidget(screen)
     
@@ -199,7 +217,51 @@ class LockScreen(QMainWindow):
             self.session_manager.pause_session()
             self.lock_screen()
     
+    def open_settings(self):
+        """Open settings dialog to configure server URL."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Settings")
+        dialog.setMinimumWidth(400)
+        
+        layout = QFormLayout(dialog)
+        
+        # Server URL
+        server_input = QLineEdit(client_config.get_server_url())
+        layout.addRow("Server URL:", server_input)
+        
+        # PC ID
+        pc_input = QLineEdit(str(client_config.get_pc_id()))
+        layout.addRow("PC ID:", pc_input)
+        
+        # Branch ID
+        branch_input = QLineEdit(str(client_config.get_branch_id()))
+        layout.addRow("Branch ID:", branch_input)
+        
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        
+        if dialog.exec():
+            # Save settings
+            client_config.set("server_url", server_input.text())
+            client_config.set("pc_id", int(pc_input.text()))
+            client_config.set("branch_id", int(branch_input.text()))
+            
+            # Update session manager
+            self.session_manager.server_url = server_input.text()
+            self.current_pc_id = int(pc_input.text())
+            
+            QMessageBox.information(self, "Settings", "Settings saved!")
+    
     def keyPressEvent(self, event):
+        # Allow Escape to exit when no active session
+        if event.key() == Qt.Key.Key_Escape and not self.session_manager.is_active:
+            self.close()
+            return
         # Disable Alt+F4 and other system keys
         if event.key() in [
             Qt.Key.Key_Alt,
@@ -211,5 +273,8 @@ class LockScreen(QMainWindow):
         super().keyPressEvent(event)
     
     def closeEvent(self, event):
-        # Prevent closing
-        event.ignore()
+        # Allow closing when no active session
+        if not self.session_manager.is_active:
+            event.accept()
+        else:
+            event.ignore()

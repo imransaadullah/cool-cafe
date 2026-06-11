@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  local_db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: cybercafe
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - local_db_data:/var/lib/postgresql/data
+    networks:
+      - cybercafe
+
+  local_server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/local_server/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@local_db:5432/cybercafe
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      DEPLOYMENT_MODE: local_only
+    depends_on:
+      - local_db
+    networks:
+      - cybercafe
+    command: >
+      sh -c "prisma db push && uvicorn local_server.app.main:app --host 0.0.0.0 --port 8000"
+
+  global_db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: cybercafe_global
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - global_db_data:/var/lib/postgresql/data
+    networks:
+      - cybercafe
+
+  global_server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/global_server/Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@global_db:5432/cybercafe_global
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+    depends_on:
+      - global_db
+    networks:
+      - cybercafe
+    command: >
+      sh -c "prisma db push && uvicorn global_server.app.main:app --host 0.0.0.0 --port 8000"
+
+  dashboard:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ../../dashboard/frontend:/app
+    ports:
+      - "3000:3000"
+    networks:
+      - cybercafe
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
+volumes:
+  local_db_data:
+  global_db_data:
+
+networks:
+  cybercafe:
+    driver: bridge

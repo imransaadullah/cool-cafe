@@ -1,0 +1,21 @@
+{
+    "server_url": "http://localhost:8000",
+    "pc_id": 1,
+    "branch_id": 1,
+    "heartbeat_interval": 5,
+    "offline_mode": false,
+    "filtering": {
+        "dns_blocking": true,
+        "process_blocking": true,
+        "url_filtering": true
+    },
+    "ui": {
+        "fullscreen": true,
+        "always_on_top": true,
+        "theme": "dark"
+    },
+    "logging": {
+        "level": "INFO",
+        "file": "client.log"
+    }
+}

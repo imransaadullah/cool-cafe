@@ -1,0 +1,230 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-py"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Branch {
+  id          Int       @id @default(autoincrement())
+  name        String
+  address     String?
+  phone       String?
+  email       String?
+  config      Json?
+  globalId    Int?      @unique @map("global_id")
+  lastSyncAt  DateTime? @map("last_sync_at")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  admins          Admin[]
+  pcs             PC[]
+  sessions        Session[]
+  codes           Code[]
+  codeBatches     CodeBatch[]
+  payments        Payment[]
+  revenueReports  RevenueReport[]
+  filterRules     FilterRule[]
+
+  @@map("branches")
+}
+
+model Admin {
+  id            Int       @id @default(autoincrement())
+  username      String    @unique
+  email         String?   @unique
+  passwordHash  String    @map("password_hash")
+  fullName      String?   @map("full_name")
+  role          String    @default("branch_admin")
+  branchId      Int?      @map("branch_id")
+  createdById   Int?      @map("created_by_id")
+  isActive      Boolean   @default(true) @map("is_active")
+  lastLoginAt   DateTime? @map("last_login_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  branch        Branch?   @relation(fields: [branchId], references: [id])
+  createdBy     Admin?    @relation("AdminHierarchy", fields: [createdById], references: [id])
+  createdAdmins Admin[]   @relation("AdminHierarchy")
+  codeBatches   CodeBatch[]
+
+  @@map("admins")
+}
+
+model PC {
+  id                Int       @id @default(autoincrement())
+  name              String
+  pcNumber          Int       @map("pc_number")
+  branchId          Int       @map("branch_id")
+  ipAddress         String?   @map("ip_address")
+  macAddress        String?   @map("mac_address")
+  status            String    @default("offline")
+  lastHeartbeatAt   DateTime? @map("last_heartbeat_at")
+  currentSessionId  Int?      @map("current_session_id")
+  config            String?   @default("{}")
+  isActive          Boolean   @default(true) @map("is_active")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  branch          Branch?   @relation(fields: [branchId], references: [id])
+  currentSession  Session?  @relation("PCCurrentSession", fields: [currentSessionId], references: [id])
+  sessions        Session[] @relation("PCSessions")
+
+  @@map("pcs")
+}
+
+model Session {
+  id                    Int       @id @default(autoincrement())
+  pcId                  Int       @map("pc_id")
+  branchId              Int       @map("branch_id")
+  codeId                Int?      @map("code_id")
+  startTime             DateTime  @default(now()) @map("start_time")
+  endTime               DateTime? @map("end_time")
+  pausedAt              DateTime? @map("paused_at")
+  totalPausedMinutes    Float     @default(0) @map("total_paused_minutes")
+  durationMinutes       Float     @map("duration_minutes")
+  remainingMinutes      Float?    @map("remaining_minutes")
+  status                String    @default("active")
+  isActive              Boolean   @default(true) @map("is_active")
+  amountCharged         Float     @default(0) @map("amount_charged")
+  localId               String?   @unique @map("local_id")
+  synced                Boolean   @default(false)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  pc              PC?        @relation("PCSessions", fields: [pcId], references: [id])
+  currentForPCs   PC[]       @relation("PCCurrentSession")
+  branch          Branch?    @relation(fields: [branchId], references: [id])
+  code            Code?      @relation("SessionCode", fields: [codeId], references: [id])
+  usedCodes       Code[]     @relation("CodeUsedBySession")
+  payments        Payment[]
+
+  @@map("sessions")
+}
+
+model Code {
+  id                Int       @id @default(autoincrement())
+  code              String    @unique
+  durationMinutes   Float     @map("duration_minutes")
+  batchId           Int?      @map("batch_id")
+  branchId          Int       @map("branch_id")
+  isUsed            Boolean   @default(false) @map("is_used")
+  usedAt            DateTime? @map("used_at")
+  usedBySessionId   Int?      @map("used_by_session_id")
+  value             Float     @default(0)
+  isActive          Boolean   @default(true) @map("is_active")
+  expiresAt         DateTime? @map("expires_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  batch           CodeBatch? @relation(fields: [batchId], references: [id])
+  branch          Branch?    @relation(fields: [branchId], references: [id])
+  usedBySession   Session?   @relation("CodeUsedBySession", fields: [usedBySessionId], references: [id])
+  sessions        Session[]  @relation("SessionCode")
+
+  @@map("codes")
+}
+
+model CodeBatch {
+  id                Int       @id @default(autoincrement())
+  branchId          Int       @map("branch_id")
+  createdById       Int?      @map("created_by_id")
+  batchName         String?   @map("batch_name")
+  count             Int
+  durationMinutes   Float     @map("duration_minutes")
+  valuePerCode      Float     @default(0) @map("value_per_code")
+  isActive          Boolean   @default(true) @map("is_active")
+  printed           Boolean   @default(false)
+  printedAt         DateTime? @map("printed_at")
+  localId           String?   @unique @map("local_id")
+  synced            Boolean   @default(false)
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  branch          Branch?   @relation(fields: [branchId], references: [id])
+  createdBy       Admin?    @relation(fields: [createdById], references: [id])
+  codes           Code[]
+
+  @@map("code_batches")
+}
+
+model Payment {
+  id                Int       @id @default(autoincrement())
+  sessionId         Int?      @map("session_id")
+  branchId          Int       @map("branch_id")
+  amount            Float
+  currency          String    @default("NGN")
+  method            String
+  reference         String?
+  paymentReference  String?   @map("payment_reference")
+  status            String    @default("completed")
+  localId           String?   @unique @map("local_id")
+  synced            Boolean   @default(false)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  session         Session?  @relation(fields: [sessionId], references: [id])
+  branch          Branch?   @relation(fields: [branchId], references: [id])
+
+  @@map("payments")
+}
+
+model RevenueReport {
+  id                      Int       @id @default(autoincrement())
+  branchId                Int       @map("branch_id")
+  reportDate              DateTime  @map("report_date")
+  reportType              String    @default("daily") @map("report_type")
+  totalRevenue            Float     @default(0) @map("total_revenue")
+  totalSessions           Int       @default(0) @map("total_sessions")
+  totalCodesUsed          Int       @default(0) @map("total_codes_used")
+  totalPausedSessions     Int       @default(0) @map("total_paused_sessions")
+  averageSessionDuration  Float     @default(0) @map("average_session_duration")
+  peakHourStart           Int?      @map("peak_hour_start")
+  peakHourEnd             Int?      @map("peak_hour_end")
+  localId                 String?   @unique @map("local_id")
+  synced                  Boolean   @default(false)
+  generatedAt             DateTime  @default(now()) @map("generated_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+
+  branch          Branch?   @relation(fields: [branchId], references: [id])
+
+  @@map("revenue_reports")
+}
+
+model FilterRule {
+  id            Int       @id @default(autoincrement())
+  branchId      Int?      @map("branch_id")
+  ruleType      String    @map("rule_type")
+  pattern       String
+  action        String    @default("block")
+  priority      Int       @default(0)
+  isActive      Boolean   @default(true) @map("is_active")
+  description   String?
+  localId       String?   @unique @map("local_id")
+  synced        Boolean   @default(false)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  branch        Branch?   @relation(fields: [branchId], references: [id])
+
+  @@map("filter_rules")
+}
+
+model OfflineQueue {
+  id            Int       @id @default(autoincrement())
+  actionType    String    @map("action_type")
+  tableName     String    @map("table_name")
+  recordId      String    @map("record_id")
+  payload       String
+  synced        Boolean   @default(false)
+  syncedAt      DateTime? @map("synced_at")
+  errorMessage  String?   @map("error_message")
+  retryCount    Int       @default(0) @map("retry_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@map("offline_queue")
+}

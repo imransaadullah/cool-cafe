@@ -9,14 +9,82 @@ import os
 import sys
 import subprocess
 import shutil
+import sysconfig
 from pathlib import Path
 from dotenv import load_dotenv
 
 
+def _python_scripts_dirs():
+    """Return existing Scripts directories for this Python install."""
+    dirs = []
+    seen = set()
+
+    def add(path: Path):
+        key = str(path).lower()
+        if path.exists() and key not in seen:
+            seen.add(key)
+            dirs.append(path)
+
+    try:
+        import site
+
+        add(Path(site.getusersitepackages()).parent / "Scripts")
+    except Exception:
+        pass
+
+    try:
+        add(Path(sysconfig.get_path("scripts")))
+    except Exception:
+        pass
+
+    return dirs
+
+
+def ensure_prisma_path():
+    """Put Python Scripts dir on PATH so prisma-client-py is found."""
+    path = os.environ.get("PATH", "")
+    additions = []
+    for scripts in _python_scripts_dirs():
+        scripts_str = str(scripts)
+        if scripts_str.lower() not in path.lower():
+            additions.append(scripts_str)
+    if additions:
+        os.environ["PATH"] = os.pathsep.join(additions) + os.pathsep + path
+
+
 def run(cmd, cwd=None):
     """Run command, return (success, output)."""
-    result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
     return result.returncode == 0, result.stdout + result.stderr
+
+
+def run_prisma():
+    """Generate Prisma client and push schema to the database."""
+    ensure_prisma_path()
+
+    print("\n[prisma] Pushing schema to database...")
+    success, output = run(
+        f'"{sys.executable}" -m prisma db push --accept-data-loss --skip-generate'
+    )
+    if not success:
+        print(output.strip() or "  Failed (no output)")
+        return False
+    print("  Done")
+
+    print("\n[prisma] Generating Prisma client...")
+    success, output = run(f'"{sys.executable}" -m prisma generate')
+    if not success:
+        print(output.strip() or "  Failed (no output)")
+        return False
+    print("  Done")
+    return True
 
 
 def main():
@@ -25,39 +93,26 @@ def main():
     
     # Load .env
     load_dotenv()
-    
-    # Ensure pip-installed console scripts (prisma, prisma-client-py) are on PATH
-    try:
-        import site
-        scripts_dir = Path(site.getusersitepackages()).parent / "Scripts"
-        if scripts_dir.exists():
-            os.environ["PATH"] = f"{scripts_dir}{os.pathsep}{os.environ['PATH']}"
-    except Exception:
-        pass
-    
+    ensure_prisma_path()
+
+    if "--prisma-only" in sys.argv:
+        sys.exit(0 if run_prisma() else 1)
+
     print("=" * 50)
     print("  CyberCafe Setup")
     print("=" * 50)
     
     # 1. Install Python dependencies
-    print("\n[1/7] Installing Python dependencies...")
+    print("\n[1/6] Installing Python dependencies...")
     run("pip install -r local_server/requirements.txt")
     run("pip install -r client/requirements.txt")
     run("pip install prisma")
     run("pip install python-dotenv")
     run("pip install psycopg2-binary")
     print("  Done")
-    
-    # 2. Generate Prisma client
-    print("\n[2/7] Generating Prisma client...")
-    success, output = run("python -m prisma generate")
-    if success:
-        print("  Done")
-    else:
-        print(f"  Warning: {output.strip()[:200]}")
-    
-    # 3. Create database if not exists
-    print("\n[3/7] Creating database...")
+
+    # 2. Create database if not exists
+    print("\n[2/6] Creating database...")
     
     db_url = os.environ.get("DATABASE_URL", "")
     
@@ -89,28 +144,26 @@ def main():
     except Exception as e:
         print(f"  Warning: Could not create database: {e}")
     
-    # 4. Push schema to database
-    print("\n[4/7] Pushing schema to database...")
-    success, output = run("python -m prisma db push")
-    if success:
-        print("  Done")
-    else:
-        print(f"  Warning: {output.strip()[:200]}")
-    
-    # 5. Create admin user
-    print("\n[5/7] Creating admin user...")
+    # 3. Prisma db push + generate
+    print("\n[3/6] Syncing Prisma schema and client...")
+    if not run_prisma():
+        print("  Prisma sync failed. Fix errors above and try again.")
+        sys.exit(1)
+
+    # 4. Create admin user
+    print("\n[4/6] Creating admin user...")
     run("python scripts/create_admin.py")
     print("  Done")
     
-    # 6. Install dashboard dependencies
-    print("\n[6/7] Installing dashboard dependencies...")
+    # 5. Install dashboard dependencies
+    print("\n[5/6] Installing dashboard dependencies...")
     dashboard_dir = Path("dashboard/frontend")
     if dashboard_dir.exists():
         run("npm install", cwd=dashboard_dir)
     print("  Done")
 
-    # 7. Quick sanity check
-    print("\n[7/7] Verifying setup...")
+    # 6. Quick sanity check
+    print("\n[6/6] Verifying setup...")
     checks = [
         ("PyQt6", "import PyQt6"),
         ("requests", "import requests"),

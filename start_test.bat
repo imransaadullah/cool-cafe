@@ -8,11 +8,22 @@ echo   CyberCafe Setup and Start
 echo ========================================
 echo.
 
-REM Idempotent setup: deps, prisma db push, admin user, dashboard npm
+REM Idempotent setup: deps, admin user, dashboard npm
 python setup.py
 if errorlevel 1 (
     echo.
     echo Setup failed. Fix the errors above and try again.
+    pause
+    exit /b 1
+)
+
+REM Sync Prisma schema + client before starting server (picks up schema changes)
+echo.
+echo Syncing Prisma database and client...
+python setup.py --prisma-only
+if errorlevel 1 (
+    echo.
+    echo Prisma sync failed. Fix the errors above and try again.
     pause
     exit /b 1
 )

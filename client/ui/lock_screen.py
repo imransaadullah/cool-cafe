@@ -28,6 +28,7 @@ class LockScreen(QMainWindow):
         self.offline_manager = OfflineManager()
         self.heartbeat_thread = None
         self.session_overlay = None
+        self.pending_resume = None
         self.current_pc_id = client_config.get_pc_id()
         
         self.setup_ui()
@@ -96,6 +97,18 @@ class LockScreen(QMainWindow):
         submit_btn.setMinimumHeight(50)
         submit_btn.clicked.connect(self.on_code_submit)
         layout.addWidget(submit_btn)
+
+        self.resume_btn = QPushButton("RESUME SESSION")
+        self.resume_btn.setMinimumHeight(50)
+        self.resume_btn.clicked.connect(self.on_resume_session)
+        self.resume_btn.setVisible(False)
+        layout.addWidget(self.resume_btn)
+
+        self.resume_info_label = QLabel("")
+        self.resume_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.resume_info_label.setStyleSheet("color: #4ecdc4; font-size: 13px; background: transparent;")
+        self.resume_info_label.setVisible(False)
+        layout.addWidget(self.resume_info_label)
         
         # Status label
         self.code_status_label = QLabel("")
@@ -188,6 +201,12 @@ class LockScreen(QMainWindow):
         if not code:
             self.code_status_label.setText("Please enter a code")
             return
+
+        if self.pending_resume and self.pending_resume.get("can_resume"):
+            self.code_status_label.setText(
+                "Session paused — use Resume Session to continue"
+            )
+            return
         
         self.code_status_label.setText("Validating code...")
         
@@ -207,6 +226,54 @@ class LockScreen(QMainWindow):
             self.offline_manager.queue_action(
                 "code_attempt", {"code": code, "pc_id": self.current_pc_id}
             )
+
+    def on_resume_session(self):
+        info = self.pending_resume or self.session_manager.get_resume_info(
+            self.current_pc_id
+        )
+        if not info or not info.get("can_resume"):
+            message = info.get("message") if info else "No session to resume"
+            self.code_status_label.setText(message or "Cannot resume session")
+            return
+
+        self.code_status_label.setText("Resuming session...")
+        success, message, session_data = self.session_manager.resume_paused_session(
+            info["session_id"]
+        )
+
+        if success:
+            self.session_manager.start_session(session_data)
+            self.start_heartbeat()
+            self.code_status_label.setText("")
+            self.enter_session_mode()
+        else:
+            self.code_status_label.setText(message)
+            self.refresh_resume_status()
+
+    def refresh_resume_status(self):
+        """Update resume button based on server paused session state."""
+        info = self.session_manager.get_resume_info(self.current_pc_id)
+        self.pending_resume = info
+
+        if info and info.get("can_resume"):
+            remaining = info.get("remaining_seconds") or 0
+            logins_left = info.get("resumes_remaining", 0)
+            max_res = info.get("max_resumes", 0)
+            self.resume_btn.setVisible(True)
+            self.resume_btn.setText(
+                f"RESUME SESSION ({self._format_remaining(remaining)} left)"
+            )
+            self.resume_info_label.setText(
+                f"{logins_left} of {max_res} login(s) remaining"
+            )
+            self.resume_info_label.setVisible(True)
+        else:
+            self.resume_btn.setVisible(False)
+            if info and info.get("session_id") and info.get("message"):
+                self.resume_info_label.setText(info["message"])
+                self.resume_info_label.setVisible(True)
+            else:
+                self.resume_info_label.setVisible(False)
     
     def restore_active_session(self):
         """Resume UI and heartbeat if a valid session was cached."""
@@ -240,6 +307,7 @@ class LockScreen(QMainWindow):
         self.raise_()
         self.activateWindow()
         self.code_input.setFocus()
+        self.refresh_resume_status()
 
     def start_heartbeat(self):
         if self.heartbeat_thread and self.heartbeat_thread.isRunning():
@@ -281,7 +349,10 @@ class LockScreen(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            self.session_manager.pause_session()
+            paused, message = self.session_manager.pause_session()
+            if not paused:
+                QMessageBox.warning(parent, "Logout", message)
+                return
             self._stop_heartbeat()
             self.show_lock_ui()
     

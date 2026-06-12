@@ -2,14 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from prisma import Prisma
 from shared.database import get_db
 from shared.orm_model import ORMModel
+from shared.session_rules import (
+    MIN_REMAINING_MINUTES_TO_RESUME,
+    max_allowed_resumes,
+    resumes_remaining,
+)
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
+import uuid
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
-import uuid
 
 router = APIRouter()
 
@@ -60,6 +65,88 @@ class CodeRedeemResponse(BaseModel):
     session_id: Optional[int] = None
     duration_minutes: Optional[float] = None
     end_time: Optional[datetime] = None
+
+
+class ResumeInfoResponse(BaseModel):
+    can_resume: bool
+    message: Optional[str] = None
+    session_id: Optional[int] = None
+    remaining_minutes: Optional[float] = None
+    remaining_seconds: Optional[float] = None
+    resume_count: Optional[int] = None
+    max_resumes: Optional[int] = None
+    resumes_remaining: Optional[int] = None
+
+
+class ResumeSessionResponse(BaseModel):
+    success: bool
+    message: str
+    session_id: Optional[int] = None
+    end_time: Optional[datetime] = None
+    remaining_minutes: Optional[float] = None
+    resume_count: Optional[int] = None
+    max_resumes: Optional[int] = None
+    resumes_remaining: Optional[int] = None
+
+
+def _build_resume_info(session) -> ResumeInfoResponse:
+    remaining = session.remainingMinutes or 0
+    max_res = max_allowed_resumes(session.durationMinutes)
+    used = session.resumeCount or 0
+    left = resumes_remaining(session.durationMinutes, used)
+
+    if remaining < MIN_REMAINING_MINUTES_TO_RESUME:
+        return ResumeInfoResponse(
+            can_resume=False,
+            message=f"Less than {MIN_REMAINING_MINUTES_TO_RESUME} minutes remaining",
+            session_id=session.id,
+            remaining_minutes=remaining,
+            remaining_seconds=remaining * 60,
+            resume_count=used,
+            max_resumes=max_res,
+            resumes_remaining=left,
+        )
+
+    if left <= 0:
+        return ResumeInfoResponse(
+            can_resume=False,
+            message="No logins remaining for this session",
+            session_id=session.id,
+            remaining_minutes=remaining,
+            remaining_seconds=remaining * 60,
+            resume_count=used,
+            max_resumes=max_res,
+            resumes_remaining=0,
+        )
+
+    return ResumeInfoResponse(
+        can_resume=True,
+        session_id=session.id,
+        remaining_minutes=remaining,
+        remaining_seconds=remaining * 60,
+        resume_count=used,
+        max_resumes=max_res,
+        resumes_remaining=left,
+    )
+
+
+async def _get_paused_session_for_pc(pc_id: int, db: Prisma):
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if not pc or not pc.currentSessionId:
+        return None, pc
+    session = await db.session.find_unique(where={"id": pc.currentSessionId})
+    if not session or not session.isActive or session.status != "paused":
+        return None, pc
+    return session, pc
+
+
+@router.get("/pc/{pc_id}/resume-info", response_model=ResumeInfoResponse)
+async def get_resume_info(pc_id: int, db: Prisma = Depends(get_db)):
+    """Check whether this PC has a paused session that can be resumed."""
+    session, _pc = await _get_paused_session_for_pc(pc_id, db)
+    if not session:
+        return ResumeInfoResponse(can_resume=False, message="No paused session")
+    return _build_resume_info(session)
 
 
 @router.get("/", response_model=List[SessionResponse])
@@ -204,26 +291,29 @@ async def pause_session(session_id: int, db: Prisma = Depends(get_db)):
     return {"detail": "Session paused", "remaining_minutes": remaining}
 
 
-@router.post("/resume")
+@router.post("/resume", response_model=ResumeSessionResponse)
 async def resume_session(session_id: int, db: Prisma = Depends(get_db)):
     session = await db.session.find_unique(where={"id": session_id})
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     if session.status != "paused":
         raise HTTPException(status_code=400, detail="Session is not paused")
-    
-    # Calculate paused duration
+
+    info = _build_resume_info(session)
+    if not info.can_resume:
+        return ResumeSessionResponse(success=False, message=info.message or "Cannot resume")
+
+    remaining = session.remainingMinutes or 0
     total_paused = session.totalPausedMinutes or 0
     if session.pausedAt:
         paused_duration = (utcnow() - session.pausedAt).total_seconds() / 60
         total_paused += paused_duration
-    
-    # Resume session
-    new_start_time = utcnow() - timedelta(
-        minutes=session.durationMinutes - (session.remainingMinutes or 0)
-    )
-    
+
+    new_start_time = utcnow() - timedelta(minutes=session.durationMinutes - remaining)
+    new_resume_count = (session.resumeCount or 0) + 1
+    end_time = utcnow() + timedelta(minutes=remaining)
+
     await db.session.update(
         where={"id": session_id},
         data={
@@ -231,16 +321,29 @@ async def resume_session(session_id: int, db: Prisma = Depends(get_db)):
             "pausedAt": None,
             "totalPausedMinutes": total_paused,
             "startTime": new_start_time,
+            "endTime": end_time,
+            "resumeCount": new_resume_count,
         },
     )
-    
-    # Update PC
+
     await db.pc.update(
         where={"id": session.pcId},
         data={"status": "in_use"},
     )
-    
-    return {"detail": "Session resumed"}
+
+    max_res = max_allowed_resumes(session.durationMinutes)
+    left = resumes_remaining(session.durationMinutes, new_resume_count)
+
+    return ResumeSessionResponse(
+        success=True,
+        message="Session resumed",
+        session_id=session_id,
+        end_time=end_time,
+        remaining_minutes=remaining,
+        resume_count=new_resume_count,
+        max_resumes=max_res,
+        resumes_remaining=left,
+    )
 
 
 @router.get("/heartbeat/{pc_id}", response_model=HeartbeatResponse)
@@ -317,6 +420,26 @@ async def redeem_code(request: CodeRedeemRequest, db: Prisma = Depends(get_db)):
     pc = await db.pc.find_unique(where={"id": request.pc_id})
     if not pc:
         return CodeRedeemResponse(success=False, message="PC not found")
+
+    if pc.currentSessionId:
+        existing = await db.session.find_unique(where={"id": pc.currentSessionId})
+        if existing and existing.isActive and existing.status == "paused":
+            info = _build_resume_info(existing)
+            if info.can_resume:
+                return CodeRedeemResponse(
+                    success=False,
+                    message="Session paused — click Resume Session to continue",
+                )
+            if (existing.remainingMinutes or 0) >= MIN_REMAINING_MINUTES_TO_RESUME:
+                return CodeRedeemResponse(
+                    success=False,
+                    message=info.message or "Cannot start a new session yet",
+                )
+        elif existing and existing.isActive and existing.status == "active":
+            return CodeRedeemResponse(
+                success=False,
+                message="PC already has an active session",
+            )
     
     # Mark code as used
     await db.code.update(

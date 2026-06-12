@@ -112,6 +112,7 @@ model Session {
   totalPausedMinutes    Float     @default(0) @map("total_paused_minutes")
   durationMinutes       Float     @map("duration_minutes")
   remainingMinutes      Float?    @map("remaining_minutes")
+  resumeCount           Int       @default(0) @map("resume_count")
   status                String    @default("active")
   isActive              Boolean   @default(true) @map("is_active")
   amountCharged         Float     @default(0) @map("amount_charged")

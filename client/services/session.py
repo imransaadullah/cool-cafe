@@ -117,51 +117,73 @@ class SessionManager:
         self.remaining_seconds = (self.end_time - _utc_now()).total_seconds()
         self._save_local_cache()
     
-    def pause_session(self) -> bool:
+    def pause_session(self) -> Tuple[bool, str]:
         """Pause the current session on the server and clear local active state."""
         if not self.is_active:
-            return False
+            return False, "No active session"
 
         session_id = self.session_id
-        paused = False
+        message = "Could not pause session"
         try:
             response = requests.post(
                 f"{self.server_url}/api/sessions/pause",
                 params={"session_id": session_id},
                 timeout=10,
             )
-            paused = response.status_code == 200
+            if response.status_code == 200:
+                message = "Session paused"
+            else:
+                detail = response.json().get("detail", message)
+                message = detail if isinstance(detail, str) else message
+                return False, message
         except requests.exceptions.RequestException:
-            pass
+            return False, "Server offline. Please try again later."
 
         self.is_active = False
         self.remaining_seconds = 0
         self.end_time = None
         if os.path.exists(self.local_cache_file):
             os.remove(self.local_cache_file)
-        return paused
-    
-    def resume_session(self):
-        """Resume a paused session."""
-        if self.session_id is None:
-            return False
-        
+        return True, message
+
+    def get_resume_info(self, pc_id: int) -> Optional[dict]:
+        """Fetch paused session resume eligibility from the server."""
         try:
-            response = requests.post(
-                f"{self.server_url}/api/sessions/resume",
-                params={"session_id": self.session_id},
+            response = requests.get(
+                f"{self.server_url}/api/sessions/pc/{pc_id}/resume-info",
                 timeout=10,
             )
             if response.status_code == 200:
-                data = response.json()
-                self.is_active = True
-                self.remaining_seconds = data.get("remaining_minutes", 0) * 60
-                self.end_time = _utc_now() + timedelta(seconds=self.remaining_seconds)
-                self._save_local_cache()
-                return True
+                return response.json()
         except requests.exceptions.RequestException:
             pass
-        
+        return None
+
+    def resume_paused_session(
+        self, session_id: int
+    ) -> Tuple[bool, str, Optional[dict]]:
+        """Resume a paused session without redeeming a new code."""
+        try:
+            response = requests.post(
+                f"{self.server_url}/api/sessions/resume",
+                params={"session_id": session_id},
+                timeout=10,
+            )
+            data = response.json()
+            if response.status_code == 200 and data.get("success"):
+                return True, data.get("message", "Session resumed"), data
+            return False, data.get("message", "Cannot resume session"), None
+        except requests.exceptions.RequestException:
+            return False, "Server offline. Please try again later.", None
+    
+    def resume_session(self):
+        """Resume a paused session (legacy helper)."""
+        if self.session_id is None:
+            return False
+        success, _message, data = self.resume_paused_session(self.session_id)
+        if success and data:
+            self.start_session(data)
+            return True
         return False
     
     def end_session(self):

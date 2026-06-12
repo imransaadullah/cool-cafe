@@ -40,9 +40,16 @@
             </span>
           </div>
           <div class="flex justify-between">
+            <span class="text-gray-500">Ticket:</span>
+            <span v-if="pc.session_code" class="font-mono text-sm">
+              {{ pc.session_code }}
+            </span>
+            <span v-else class="text-gray-500">—</span>
+          </div>
+          <div class="flex justify-between">
             <span class="text-gray-500">Session:</span>
-            <span v-if="pc.has_active_session" class="text-green-600">
-              Active ({{ formatTime(pc.time_left) }} left)
+            <span v-if="pc.has_active_session" :class="sessionClass(pc)">
+              {{ sessionLabel(pc) }} ({{ formatTime(pc.time_left) }} left)
             </span>
             <span v-else class="text-gray-500">None</span>
           </div>
@@ -258,6 +265,16 @@ const formatDate = (dateStr) => {
 const formatTime = (seconds) => {
   const mins = Math.floor(seconds / 60)
   return `${mins} min`
+}
+
+const sessionLabel = (pc) => {
+  if (pc.session_status === 'paused') return 'Paused'
+  return 'Active'
+}
+
+const sessionClass = (pc) => {
+  if (pc.session_status === 'paused') return 'text-amber-600'
+  return 'text-green-600'
 }
 
 const editPC = (pc) => {

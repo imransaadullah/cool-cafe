@@ -24,6 +24,7 @@
             <th>Start Time</th>
             <th>Duration</th>
             <th>Time Left</th>
+            <th>Logins Left</th>
             <th>Status</th>
             <th>Actions</th>
           </tr>
@@ -38,6 +39,12 @@
               <span class="font-mono" :class="getTimeLeftClass(session)">
                 {{ formatTimeLeft(session) }}
               </span>
+            </td>
+            <td>
+              <span v-if="session.status === 'paused'">
+                {{ loginQuotaLabel(session) }}
+              </span>
+              <span v-else class="text-gray-400">—</span>
             </td>
             <td>
               <span
@@ -73,7 +80,7 @@
             </td>
           </tr>
           <tr v-if="activeSessions.length === 0">
-            <td colspan="7" class="text-center text-gray-500 py-4">
+            <td colspan="8" class="text-center text-gray-500 py-4">
               No active sessions
             </td>
           </tr>
@@ -161,9 +168,20 @@ const getTimeLeftClass = (session) => {
 }
 
 const getRemainingSeconds = (session) => {
+  if (session.status === 'paused' && session.remaining_minutes != null) {
+    return session.remaining_minutes * 60
+  }
+  if (!session.end_time) return 0
   const end = new Date(session.end_time)
   const now = new Date()
   return Math.max(0, (end - now) / 1000)
+}
+
+const loginQuotaLabel = (session) => {
+  const max = Math.max(1, Math.ceil(session.duration_minutes / 30))
+  const used = session.resume_count || 0
+  const left = Math.max(0, max - used)
+  return `${left} of ${max}`
 }
 
 const formatTimeLeft = (session) => {

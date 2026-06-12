@@ -95,6 +95,7 @@ model PC {
   branch          Branch?   @relation(fields: [branchId], references: [id])
   currentSession  Session?  @relation("PCCurrentSession", fields: [currentSessionId], references: [id])
   sessions        Session[] @relation("PCSessions")
+  currentSessions Session[] @relation("SessionCurrentPC")
   masterCodes     MasterCode[]
   auditLogs       SecurityAuditLog[]
 
@@ -114,6 +115,7 @@ model Session {
   remainingMinutes      Float?    @map("remaining_minutes")
   resumeCount           Int       @default(0) @map("resume_count")
   status                String    @default("active")
+  currentPcId           Int?      @map("current_pc_id")
   isActive              Boolean   @default(true) @map("is_active")
   amountCharged         Float     @default(0) @map("amount_charged")
   localId               String?   @unique @map("local_id")
@@ -122,10 +124,12 @@ model Session {
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
   pc              PC?        @relation("PCSessions", fields: [pcId], references: [id])
+  currentPc       PC?        @relation("SessionCurrentPC", fields: [currentPcId], references: [id])
   currentForPCs   PC[]       @relation("PCCurrentSession")
   branch          Branch?    @relation(fields: [branchId], references: [id])
   code            Code?      @relation("SessionCode", fields: [codeId], references: [id])
   usedCodes       Code[]     @relation("CodeUsedBySession")
+  activeForCode   Code?      @relation("CodeActiveSession")
   payments        Payment[]
 
   @@map("sessions")
@@ -140,6 +144,7 @@ model Code {
   isUsed            Boolean   @default(false) @map("is_used")
   usedAt            DateTime? @map("used_at")
   usedBySessionId   Int?      @map("used_by_session_id")
+  activeSessionId   Int?      @unique @map("active_session_id")
   value             Float     @default(0)
   isActive          Boolean   @default(true) @map("is_active")
   expiresAt         DateTime? @map("expires_at")
@@ -148,6 +153,7 @@ model Code {
   batch           CodeBatch? @relation(fields: [batchId], references: [id])
   branch          Branch?    @relation(fields: [branchId], references: [id])
   usedBySession   Session?   @relation("CodeUsedBySession", fields: [usedBySessionId], references: [id])
+  activeSession   Session?   @relation("CodeActiveSession", fields: [activeSessionId], references: [id])
   sessions        Session[]  @relation("SessionCode")
 
   @@map("codes")

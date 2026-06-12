@@ -98,6 +98,8 @@ class PCFullStatus(BaseModel):
     last_bypass_at: Optional[datetime] = None
     has_active_session: bool
     time_left: float
+    session_code: Optional[str] = None
+    session_status: Optional[str] = None
 
 
 def generate_recovery_combo() -> str:
@@ -132,19 +134,28 @@ async def get_all_pc_status(branch_id: int = None, db: Prisma = Depends(get_db))
     for pc in pcs:
         has_session = False
         time_left = 0
-        
+        session_code = None
+        session_status = None
+
         if pc.currentSessionId:
             session = await db.session.find_unique(where={"id": pc.currentSessionId})
             if session and session.isActive:
                 has_session = True
+                session_status = session.status
+                if session.codeId:
+                    code = await db.code.find_unique(where={"id": session.codeId})
+                    if code:
+                        session_code = code.code
                 if session.status == "active":
-                    elapsed = (datetime.now(timezone.utc) - session.startTime).total_seconds() / 60
+                    elapsed = (
+                        datetime.now(timezone.utc) - session.startTime
+                    ).total_seconds() / 60
                     paused = session.totalPausedMinutes or 0
                     remaining = session.durationMinutes - elapsed + paused
                     time_left = max(0, remaining * 60)
                 elif session.status == "paused":
                     time_left = (session.remainingMinutes or 0) * 60
-        
+
         result.append(PCFullStatus(
             id=pc.id,
             name=pc.name,
@@ -160,6 +171,8 @@ async def get_all_pc_status(branch_id: int = None, db: Prisma = Depends(get_db))
             last_bypass_at=pc.lastBypassAt,
             has_active_session=has_session,
             time_left=time_left,
+            session_code=session_code,
+            session_status=session_status,
         ))
     
     return result

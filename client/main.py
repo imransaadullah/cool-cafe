@@ -5,6 +5,7 @@ from PyQt6.QtCore import Qt
 from ui.lock_screen import LockScreen
 from ui.setup_wizard import SetupWizard, check_first_run
 from services.config_manager import client_config
+from services.single_instance import SingleInstanceGuard, activate_main_window
 
 # Add parent directory to path for shared imports
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -142,6 +143,11 @@ def main():
         app = QApplication(sys.argv)
         app.setApplicationName("CyberCafe Client")
         app.setOrganizationName("CyberCafe")
+
+        guard = SingleInstanceGuard(on_activate=activate_main_window)
+        if not guard.try_acquire():
+            sys.exit(0)
+        app._instance_guard = guard
 
         theme = client_config.get("ui.theme", "dark")
         apply_theme(app, theme)

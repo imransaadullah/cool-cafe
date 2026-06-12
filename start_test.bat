@@ -33,7 +33,7 @@ echo Starting services...
 echo.
 
 REM Local server (LAN accessible for client PCs)
-start "CyberCafe Server" cmd /k "cd /d %~dp0 && python -m uvicorn local_server.app.main:app --reload --host 0.0.0.0 --port 8000"
+call scripts\start_server.bat
 
 echo Waiting for server...
 set /a retries=0
@@ -47,7 +47,7 @@ echo   Warning: server health check timed out - it may still be starting
 :server_ready
 
 REM Dashboard
-start "CyberCafe Dashboard" cmd /k "cd /d %~dp0dashboard\frontend && npm run dev"
+call scripts\start_dashboard.bat
 timeout /t 2 /nobreak >nul
 
 echo.
@@ -77,8 +77,13 @@ set /p launch_client="Start client on this PC now? [Y/n]: "
 if /i "%launch_client%"=="n" goto done
 if /i "%launch_client%"=="no" goto done
 
-start "" "%~dp0client\start_client.bat"
-echo   Client launched.
+python scripts\service_guard.py client
+if %errorlevel% equ 1 (
+    start "" "%~dp0client\start_client.bat"
+    echo   Client launched.
+) else (
+    echo   Client already running.
+)
 
 :done
 echo.

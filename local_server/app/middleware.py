@@ -10,6 +10,8 @@ import traceback
 import os
 from typing import Optional
 
+import httpx
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,22 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 status_code=400,
                 content={"detail": f"Missing required field: {e}"},
             )
+
+        except httpx.ConnectError:
+            logger.warning("Database engine unavailable (server may be restarting)")
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Server is restarting, try again shortly"},
+            )
+
+        except RuntimeError as e:
+            if "not connected" in str(e).lower():
+                logger.warning("Database not connected: %s", e)
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "Server is restarting, try again shortly"},
+                )
+            raise
         
         except Exception as e:
             logger.error(f"Unhandled exception: {e}")

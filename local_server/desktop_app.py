@@ -25,6 +25,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from shared.config import settings
 from shared.database import db
+from shared.qt_single_instance import QtSingleInstanceGuard, activate_application_window
 
 
 class ServerSignals(QObject):
@@ -555,7 +556,15 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("CyberCafe Server")
     app.setOrganizationName("CyberCafe")
-    
+
+    guard = QtSingleInstanceGuard(
+        "CyberCafeServerDesktop",
+        on_activate=lambda: activate_application_window(),
+    )
+    if not guard.try_acquire():
+        sys.exit(0)
+    app._instance_guard = guard
+
     # Set dark theme
     app.setStyleSheet("""
         QMainWindow {
@@ -632,9 +641,9 @@ def main():
         }
     """)
     
-    window = MainWindow()
-    window.show()
-    
+    app.main_window = MainWindow()
+    app.main_window.show()
+
     sys.exit(app.exec())
 
 

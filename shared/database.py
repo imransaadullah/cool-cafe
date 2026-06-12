@@ -18,6 +18,7 @@ class Database:
         """Disconnect from the database."""
         if self.client:
             await self.client.disconnect()
+            self.client = None
     
     def get_client(self) -> Prisma:
         """Get the Prisma client."""

@@ -183,7 +183,7 @@ Start the system:
     start_test.bat
 
   Option 2 (manual):
-    Terminal 1: python -m uvicorn local_server.app.main:app --reload --host 0.0.0.0 --port 8000
+    Terminal 1: python -m uvicorn local_server.app.main:app --reload --reload-dir local_server --reload-dir shared --host 0.0.0.0 --port 8000
     Terminal 2: cd dashboard/frontend && npm run dev
     Client PC:  client\\start_client.bat   (or client\\main.pyw)
 

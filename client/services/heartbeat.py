@@ -5,9 +5,13 @@ Sends heartbeat to server and receives security updates
 
 import requests
 import platform
+import json
+import os
+from datetime import datetime
 from PyQt6.QtCore import QThread, pyqtSignal
 import time
 from services.config_manager import client_config
+from services.paths import app_path
 
 
 class HeartbeatThread(QThread):
@@ -77,11 +81,7 @@ class HeartbeatThread(QThread):
     
     def _check_local_cache(self):
         """Check local cache when server is unreachable."""
-        import json
-        import os
-        from datetime import datetime
-        
-        cache_file = "session_cache.json"
+        cache_file = app_path("session_cache.json")
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, "r") as f:
@@ -123,7 +123,7 @@ class HeartbeatThread(QThread):
         import os
         from datetime import datetime
         
-        queue_file = "offline_queue.json"
+        queue_file = app_path("offline_queue.json")
         queue = []
         
         if os.path.exists(queue_file):

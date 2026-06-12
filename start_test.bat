@@ -36,7 +36,7 @@ echo.
 echo   Press any key to start client...
 pause >nul
 
-start "CyberCafe Client" cmd /k "cd /d %~dp0client && python main.py"
+start "" "%~dp0client\start_client.bat"
 
 echo.
 echo All services started!

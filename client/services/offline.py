@@ -2,13 +2,14 @@ import json
 import os
 from datetime import datetime
 from typing import Any, Dict, List
+from services.paths import app_path
 
 
 class OfflineManager:
     """Manages offline queue for actions that need to be synced later."""
     
     def __init__(self):
-        self.queue_file = "offline_queue.json"
+        self.queue_file = app_path("offline_queue.json")
         self.queue = self._load_queue()
     
     def _load_queue(self) -> List[Dict[str, Any]]:

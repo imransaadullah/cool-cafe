@@ -77,15 +77,18 @@ begin
   // Check if config exists
   if not FileExists(ConfigFile) then
   begin
-    ServerURL := InputBox('Server Configuration', 'Enter Server URL:', 'http://localhost:8000');
+    ServerURL := InputBox('Server Configuration', 'Enter the cafe server IP (e.g. http://192.168.1.100:8000):', '');
     if ServerURL = '' then
-      ServerURL := 'http://localhost:8000';
+      ServerURL := 'http://192.168.1.100:8000';
     
-    // Create config file
+    // Create config file (setup wizard runs on first launch)
     SaveStringToFile(ConfigFile, 
       '{' + #13#10 +
+      '  "configured": false,' + #13#10 +
       '  "server_url": "' + ServerURL + '",' + #13#10 +
       '  "pc_id": 1,' + #13#10 +
+      '  "pc_number": 1,' + #13#10 +
+      '  "branch_id": 1,' + #13#10 +
       '  "heartbeat_interval": 5,' + #13#10 +
       '  "offline_mode": false' + #13#10 +
       '}', False);

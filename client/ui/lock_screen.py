@@ -30,6 +30,7 @@ class LockScreen(QMainWindow):
         
         self.setup_ui()
         self.setup_timer()
+        self.restore_active_session()
     
     def setup_ui(self):
         self.setWindowTitle("CyberCafe")
@@ -40,8 +41,12 @@ class LockScreen(QMainWindow):
         
         # Central widget
         central_widget = QWidget()
+        central_widget.setObjectName("lockScreenCentral")
+        central_widget.setStyleSheet(
+            "#lockScreenCentral { background-color: #1a1a2e; }"
+        )
         self.setCentralWidget(central_widget)
-        
+
         # Main layout
         main_layout = QVBoxLayout(central_widget)
         main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -93,8 +98,14 @@ class LockScreen(QMainWindow):
         # Status label
         self.code_status_label = QLabel("")
         self.code_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.code_status_label.setStyleSheet("color: #ff6b6b;")
+        self.code_status_label.setStyleSheet("color: #ff6b6b; background: transparent;")
         layout.addWidget(self.code_status_label)
+
+        # Hint for exiting when locked
+        hint_label = QLabel("Press Esc to exit  |  Settings to reconfigure")
+        hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint_label.setStyleSheet("color: #95afc0; font-size: 12px; background: transparent;")
+        layout.addWidget(hint_label)
         
         # Bottom buttons
         bottom_layout = QHBoxLayout()
@@ -132,7 +143,8 @@ class LockScreen(QMainWindow):
         layout.addWidget(self.status_label)
         
         # PC info
-        self.pc_label = QLabel(f"PC #{self.current_pc_id}")
+        pc_number = client_config.get("pc_number", self.current_pc_id)
+        self.pc_label = QLabel(f"PC #{pc_number}")
         self.pc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.pc_label.setFont(QFont("Arial", 16))
         self.pc_label.setStyleSheet("color: #95afc0;")
@@ -188,13 +200,29 @@ class LockScreen(QMainWindow):
                 "code_attempt", {"code": code, "pc_id": self.current_pc_id}
             )
     
+    def restore_active_session(self):
+        """Resume UI and heartbeat if a valid session was cached."""
+        if self.session_manager.is_active:
+            self.stack.setCurrentIndex(1)
+            self.start_heartbeat()
+
     def start_heartbeat(self):
         if self.heartbeat_thread and self.heartbeat_thread.isRunning():
             self.heartbeat_thread.stop()
-        
+
         self.heartbeat_thread = HeartbeatThread(self.current_pc_id)
+        self.heartbeat_thread.set_session_active(self.session_manager.is_active)
         self.heartbeat_thread.lock_signal.connect(self.lock_screen)
+        self.heartbeat_thread.ban_signal.connect(self.on_banned)
         self.heartbeat_thread.start()
+
+    def on_banned(self):
+        QMessageBox.warning(
+            self,
+            "PC Banned",
+            "This PC has been banned. Contact the administrator.",
+        )
+        self.lock_screen()
     
     def lock_screen(self):
         self.session_manager.end_session()
@@ -229,9 +257,9 @@ class LockScreen(QMainWindow):
         server_input = QLineEdit(client_config.get_server_url())
         layout.addRow("Server URL:", server_input)
         
-        # PC ID
-        pc_input = QLineEdit(str(client_config.get_pc_id()))
-        layout.addRow("PC ID:", pc_input)
+        # PC Number
+        pc_number_input = QLineEdit(str(client_config.get("pc_number", client_config.get_pc_id())))
+        layout.addRow("PC Number:", pc_number_input)
         
         # Branch ID
         branch_input = QLineEdit(str(client_config.get_branch_id()))
@@ -246,15 +274,36 @@ class LockScreen(QMainWindow):
         layout.addRow(buttons)
         
         if dialog.exec():
-            # Save settings
-            client_config.set("server_url", server_input.text())
-            client_config.set("pc_id", int(pc_input.text()))
-            client_config.set("branch_id", int(branch_input.text()))
-            
-            # Update session manager
-            self.session_manager.server_url = server_input.text()
-            self.current_pc_id = int(pc_input.text())
-            
+            server_url = server_input.text().strip()
+            pc_number = int(pc_number_input.text())
+            branch_id = int(branch_input.text())
+
+            try:
+                from ui.setup_wizard import register_pc_with_server
+                pc_id = register_pc_with_server(
+                    server_url,
+                    client_config.get("pc_name", f"PC-{pc_number}"),
+                    pc_number,
+                    branch_id,
+                )
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "Settings Error",
+                    f"Could not register with server: {e}",
+                )
+                return
+
+            client_config.set("server_url", server_url)
+            client_config.set("pc_number", pc_number)
+            client_config.set("pc_id", pc_id)
+            client_config.set("branch_id", branch_id)
+            client_config.set("configured", True)
+
+            self.session_manager.server_url = server_url
+            self.current_pc_id = pc_id
+            self.pc_label.setText(f"PC #{pc_number}")
+
             QMessageBox.information(self, "Settings", "Settings saved!")
     
     def keyPressEvent(self, event):

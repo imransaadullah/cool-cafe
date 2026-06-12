@@ -5,6 +5,7 @@ First-time configuration wizard for the client
 
 import sys
 import socket
+import uuid
 import requests
 import secrets
 import string
@@ -31,6 +32,37 @@ def get_local_ip():
         return "127.0.0.1"
 
 
+def get_mac_address():
+    """Get the MAC address of this machine."""
+    try:
+        node = uuid.getnode()
+        return ":".join(f"{(node >> ele) & 0xff:02x}" for ele in range(40, -1, -8))
+    except Exception:
+        return None
+
+
+def register_pc_with_server(server_url, name, pc_number, branch_id):
+    """
+    Register this PC with the server and return the database PC id.
+    Raises requests.RequestException or ValueError on failure.
+    """
+    response = requests.post(
+        f"{server_url.rstrip('/')}/api/pcs/register",
+        json={
+            "name": name,
+            "pc_number": pc_number,
+            "branch_id": branch_id,
+            "ip_address": get_local_ip(),
+            "mac_address": get_mac_address(),
+        },
+        timeout=10,
+    )
+    if response.status_code != 200:
+        detail = response.json().get("detail", response.text)
+        raise ValueError(f"Server error: {detail}")
+    return response.json()["id"]
+
+
 class SetupWizard(QMainWindow):
     """Setup wizard for first-time configuration."""
     
@@ -43,6 +75,7 @@ class SetupWizard(QMainWindow):
         # Generated security data
         self.static_code = None
         self.recovery_combo = None
+        self.registered_pc_id = None
         
         # Callback to launch lock screen after setup
         self.lock_screen_callback = None
@@ -53,6 +86,10 @@ class SetupWizard(QMainWindow):
         """Setup the wizard UI."""
         # Central widget
         central_widget = QWidget()
+        central_widget.setObjectName("setupWizardCentral")
+        central_widget.setStyleSheet(
+            "#setupWizardCentral { background-color: #1a1a2e; }"
+        )
         self.setCentralWidget(central_widget)
         
         # Main layout
@@ -102,18 +139,17 @@ class SetupWizard(QMainWindow):
         step_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         layout.addWidget(step_label)
         
-        # Auto-detect local IP
-        local_ip = get_local_ip()
-        
-        # Server URL
+        # Server URL (must be the cafe server's IP, not this PC's IP)
         layout.addWidget(QLabel("Server URL:"))
-        self.server_url_input = QLineEdit(f"http://{local_ip}:8000")
+        self.server_url_input = QLineEdit()
+        self.server_url_input.setPlaceholderText("http://192.168.1.100:8000")
         layout.addWidget(self.server_url_input)
-        
-        # Auto-detect info
-        detect_label = QLabel(f"Detected local IP: {local_ip}")
-        detect_label.setStyleSheet("color: #888; font-size: 12px;")
-        layout.addWidget(detect_label)
+
+        hint_label = QLabel(
+            "Enter the IP address of the cafe server PC (not this computer)."
+        )
+        hint_label.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addWidget(hint_label)
         
         # Test connection button
         self.test_btn = QPushButton("Test Connection")
@@ -143,12 +179,16 @@ class SetupWizard(QMainWindow):
         self.pc_name_input.setPlaceholderText("e.g., PC-01")
         layout.addWidget(self.pc_name_input)
         
-        # PC Number
+        # PC Number (display number; server assigns the database ID)
         layout.addWidget(QLabel("PC Number:"))
         self.pc_number_input = QSpinBox()
         self.pc_number_input.setRange(1, 1000)
         self.pc_number_input.setValue(1)
         layout.addWidget(self.pc_number_input)
+
+        pc_hint = QLabel("The number shown on this station (e.g. PC #1, PC #2).")
+        pc_hint.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addWidget(pc_hint)
         
         # Branch ID
         layout.addWidget(QLabel("Branch ID:"))
@@ -329,6 +369,26 @@ class SetupWizard(QMainWindow):
             if not self.pc_name_input.text().strip():
                 QMessageBox.warning(self, "Error", "Please enter PC name")
                 return
+            server_url = self.server_url_input.text().strip()
+            try:
+                pc_id = register_pc_with_server(
+                    server_url,
+                    self.pc_name_input.text().strip(),
+                    self.pc_number_input.value(),
+                    self.branch_id_input.value(),
+                )
+                self.registered_pc_id = pc_id
+            except requests.exceptions.RequestException as e:
+                QMessageBox.warning(
+                    self,
+                    "Connection Error",
+                    f"Could not register PC with server.\n\n{e}\n\n"
+                    "Check the server URL and make sure the server is running.",
+                )
+                return
+            except ValueError as e:
+                QMessageBox.warning(self, "Registration Error", str(e))
+                return
         elif current == 2:
             if not self.static_code or not self.recovery_combo:
                 QMessageBox.warning(self, "Error", "Please generate security codes")
@@ -339,15 +399,29 @@ class SetupWizard(QMainWindow):
             client_config.set("server_url", self.server_url_input.text().strip())
         elif current == 1:
             client_config.set("pc_name", self.pc_name_input.text().strip())
-            client_config.set("pc_id", self.pc_number_input.value())
+            client_config.set("pc_number", self.pc_number_input.value())
+            client_config.set("pc_id", self.registered_pc_id)
             client_config.set("branch_id", self.branch_id_input.value())
         elif current == 2:
             client_config.set("security.static_master_code", self.static_code)
             client_config.set("security.recovery_combo", "+".join(self.recovery_combo))
+            server_url = self.server_url_input.text().strip()
+            pc_id = client_config.get("pc_id")
+            try:
+                requests.post(
+                    f"{server_url.rstrip('/')}/api/pcs/{pc_id}/register-static-code",
+                    json={
+                        "static_master_code": self.static_code,
+                        "recovery_key_combo": "+".join(self.recovery_combo),
+                    },
+                    timeout=10,
+                )
+            except requests.exceptions.RequestException:
+                pass
         elif current == 3:
             client_config.set("security.auto_start_enabled", self.auto_start_checkbox.isChecked())
             client_config.set("security.run_as_service", self.service_checkbox.isChecked())
-            client_config.set("security.heartbeat_interval", self.heartbeat_input.value())
+            client_config.set("heartbeat_interval", self.heartbeat_input.value())
             client_config.set("security.alarm_enabled", self.alarm_checkbox.isChecked())
             client_config.set("security.alarm_color", self.alarm_color_input.text())
         
@@ -373,12 +447,12 @@ class SetupWizard(QMainWindow):
     
     def start_client(self):
         """Start the main client."""
+        client_config.set("configured", True)
         self.close()
         if self.lock_screen_callback:
             self.lock_screen_callback()
 
 
 def check_first_run() -> bool:
-    """Check if this is first run (no config)."""
-    server_url = client_config.get("server_url", "")
-    return not server_url or server_url == "http://localhost:8000" or server_url == ""
+    """Check if this is first run (setup wizard not completed)."""
+    return not client_config.is_configured()

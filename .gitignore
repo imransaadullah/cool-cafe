@@ -30,6 +30,13 @@ prisma/migrations/
 *.log
 logs/
 
+# Client runtime data (generated per machine)
+client/config.json
+client/session_cache.json
+client/offline_queue.json
+client/filter_config.json
+client/blocked_processes.json
+
 # IDE
 .vscode/
 .idea/

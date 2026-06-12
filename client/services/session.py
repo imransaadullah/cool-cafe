@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from services.config_manager import client_config
+from services.paths import app_path
 
 
 class SessionManager:
@@ -13,7 +14,7 @@ class SessionManager:
         self.end_time = None
         self.is_active = False
         self.remaining_seconds = 0
-        self.local_cache_file = "session_cache.json"
+        self.local_cache_file = app_path("session_cache.json")
         self._load_local_cache()
     
     def _load_local_cache(self):

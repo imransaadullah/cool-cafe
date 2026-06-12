@@ -3,11 +3,13 @@ Client Configuration Manager
 Handles loading and saving client configuration
 """
 
+import copy
 import json
 import os
 from typing import Dict, Any, Optional
 from pathlib import Path
 import logging
+from services.paths import app_path
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +18,10 @@ class ClientConfig:
     """Manages client configuration."""
     
     DEFAULT_CONFIG = {
+        "configured": False,
         "server_url": "http://localhost:8000",
         "pc_id": 1,
+        "pc_number": 1,
         "branch_id": 1,
         "heartbeat_interval": 5,
         "offline_mode": False,
@@ -45,15 +49,10 @@ class ClientConfig:
             config_path: Path to configuration file
         """
         if config_path is None:
-            # Default to executable directory
-            config_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..",
-                "config.json",
-            )
-        
+            config_path = app_path("config.json")
+
         self.config_path = Path(config_path)
-        self.config = self.DEFAULT_CONFIG.copy()
+        self.config = copy.deepcopy(self.DEFAULT_CONFIG)
         self._load()
     
     def _load(self):
@@ -74,11 +73,10 @@ class ClientConfig:
     def _merge_config(self, saved_config: Dict[str, Any]):
         """Merge saved config with defaults."""
         for key, value in saved_config.items():
-            if key in self.config:
-                if isinstance(value, dict) and isinstance(self.config[key], dict):
-                    self.config[key].update(value)
-                else:
-                    self.config[key] = value
+            if key in self.config and isinstance(value, dict) and isinstance(self.config[key], dict):
+                self.config[key].update(value)
+            else:
+                self.config[key] = value
     
     def _save(self):
         """Save configuration to file."""
@@ -145,7 +143,14 @@ class ClientConfig:
     
     def get_heartbeat_interval(self) -> int:
         """Get the heartbeat interval in seconds."""
-        return self.get("heartbeat_interval", 5)
+        interval = self.get("heartbeat_interval")
+        if interval is None:
+            interval = self.get("security.heartbeat_interval", 5)
+        return interval or 5
+
+    def is_configured(self) -> bool:
+        """Check if the client has completed setup."""
+        return bool(self.get("configured", False))
     
     def is_offline_mode(self) -> bool:
         """Check if offline mode is enabled."""
@@ -169,7 +174,7 @@ class ClientConfig:
     
     def reset(self):
         """Reset configuration to defaults."""
-        self.config = self.DEFAULT_CONFIG.copy()
+        self.config = copy.deepcopy(self.DEFAULT_CONFIG)
         self._save()
         logger.info("Configuration reset to defaults")
 

@@ -165,6 +165,35 @@ async def get_all_pc_status(branch_id: int = None, db: Prisma = Depends(get_db))
     return result
 
 
+@router.post("/register", response_model=PCResponse)
+async def register_pc(pc_data: PCCreate, db: Prisma = Depends(get_db)):
+    """Register or update a PC from client setup (lookup by branch + pc_number)."""
+    existing = await db.pc.find_first(
+        where={
+            "branchId": pc_data.branch_id,
+            "pcNumber": pc_data.pc_number,
+        }
+    )
+
+    if existing:
+        update_data = {"name": pc_data.name}
+        if pc_data.ip_address is not None:
+            update_data["ipAddress"] = pc_data.ip_address
+        if pc_data.mac_address is not None:
+            update_data["macAddress"] = pc_data.mac_address
+        return await db.pc.update(where={"id": existing.id}, data=update_data)
+
+    return await db.pc.create(
+        data={
+            "name": pc_data.name,
+            "pcNumber": pc_data.pc_number,
+            "branchId": pc_data.branch_id,
+            "ipAddress": pc_data.ip_address,
+            "macAddress": pc_data.mac_address,
+        }
+    )
+
+
 @router.get("/{pc_id}", response_model=PCResponse)
 async def get_pc(pc_id: int, db: Prisma = Depends(get_db)):
     pc = await db.pc.find_unique(where={"id": pc_id})

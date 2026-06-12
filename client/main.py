@@ -120,13 +120,16 @@ def show_lock_screen(app):
             app.main_window.windowFlags() | Qt.WindowType.WindowStaysOnTopHint
         )
 
-    if client_config.get("ui.fullscreen", True):
+    if app.main_window.session_manager.is_active:
+        app.main_window.enter_session_mode()
+    elif client_config.get("ui.fullscreen", True):
         app.main_window.showFullScreen()
     else:
         app.main_window.show()
 
-    app.main_window.raise_()
-    app.main_window.activateWindow()
+    if not app.main_window.session_manager.is_active:
+        app.main_window.raise_()
+        app.main_window.activateWindow()
 
 
 def main():

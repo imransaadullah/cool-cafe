@@ -18,6 +18,7 @@ from services.session import SessionManager
 from services.heartbeat import HeartbeatThread
 from services.offline import OfflineManager
 from services.config_manager import client_config
+from ui.session_overlay import SessionOverlay
 
 
 class LockScreen(QMainWindow):
@@ -26,6 +27,7 @@ class LockScreen(QMainWindow):
         self.session_manager = SessionManager()
         self.offline_manager = OfflineManager()
         self.heartbeat_thread = None
+        self.session_overlay = None
         self.current_pc_id = client_config.get_pc_id()
         
         self.setup_ui()
@@ -167,13 +169,19 @@ class LockScreen(QMainWindow):
         if self.session_manager.is_active:
             remaining = self.session_manager.get_remaining_seconds()
             if remaining <= 0:
-                self.lock_screen()
+                self.on_session_expired()
                 return
-            
-            hours = int(remaining // 3600)
-            minutes = int((remaining % 3600) // 60)
-            seconds = int(remaining % 60)
-            self.time_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+
+            time_text = self._format_remaining(remaining)
+            self.time_label.setText(time_text)
+            if self.session_overlay and self.session_overlay.isVisible():
+                self.session_overlay.set_time_text(time_text)
+
+    def _format_remaining(self, remaining: float) -> str:
+        hours = int(remaining // 3600)
+        minutes = int((remaining % 3600) // 60)
+        seconds = int(remaining % 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     
     def on_code_submit(self):
         code = self.code_input.text().strip()
@@ -191,8 +199,8 @@ class LockScreen(QMainWindow):
         if success:
             self.session_manager.start_session(session_data)
             self.start_heartbeat()
-            self.stack.setCurrentIndex(1)
             self.code_status_label.setText("")
+            self.enter_session_mode()
         else:
             self.code_status_label.setText(message)
             # Store failed attempt for offline queue
@@ -203,8 +211,35 @@ class LockScreen(QMainWindow):
     def restore_active_session(self):
         """Resume UI and heartbeat if a valid session was cached."""
         if self.session_manager.is_active:
-            self.stack.setCurrentIndex(1)
             self.start_heartbeat()
+            self.enter_session_mode()
+
+    def _ensure_session_overlay(self):
+        if self.session_overlay is None:
+            self.session_overlay = SessionOverlay()
+            self.session_overlay.logout_requested.connect(self.on_logout)
+
+    def enter_session_mode(self):
+        """Hide the lock screen and release the desktop for the user."""
+        self._ensure_session_overlay()
+        remaining = self.session_manager.get_remaining_seconds()
+        self.session_overlay.set_time_text(self._format_remaining(remaining))
+        self.hide()
+        self.session_overlay.show()
+        self.session_overlay.raise_()
+
+    def show_lock_ui(self):
+        """Show the fullscreen code-entry screen."""
+        if self.session_overlay:
+            self.session_overlay.hide()
+        self.stack.setCurrentIndex(0)
+        self.code_input.clear()
+        self.code_status_label.setText("")
+        self.time_label.setText("00:00:00")
+        self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
+        self.code_input.setFocus()
 
     def start_heartbeat(self):
         if self.heartbeat_thread and self.heartbeat_thread.isRunning():
@@ -212,7 +247,7 @@ class LockScreen(QMainWindow):
 
         self.heartbeat_thread = HeartbeatThread(self.current_pc_id)
         self.heartbeat_thread.set_session_active(self.session_manager.is_active)
-        self.heartbeat_thread.lock_signal.connect(self.lock_screen)
+        self.heartbeat_thread.lock_signal.connect(self.on_session_expired)
         self.heartbeat_thread.ban_signal.connect(self.on_banned)
         self.heartbeat_thread.start()
 
@@ -222,28 +257,33 @@ class LockScreen(QMainWindow):
             "PC Banned",
             "This PC has been banned. Contact the administrator.",
         )
-        self.lock_screen()
-    
-    def lock_screen(self):
+        self.on_session_expired()
+
+    def on_session_expired(self):
+        """Session time ran out — end session and return to lock screen."""
         self.session_manager.end_session()
-        if self.heartbeat_thread:
+        self._stop_heartbeat()
+        self.show_lock_ui()
+
+    def _stop_heartbeat(self):
+        if self.heartbeat_thread and self.heartbeat_thread.isRunning():
             self.heartbeat_thread.stop()
-        self.stack.setCurrentIndex(0)
-        self.code_input.clear()
-        self.time_label.setText("00:00:00")
-    
+            self.heartbeat_thread = None
+
     def on_logout(self):
+        parent = self.session_overlay if self.session_overlay and self.session_overlay.isVisible() else self
         reply = QMessageBox.question(
-            self,
+            parent,
             "Logout",
             "Are you sure you want to logout? Your session will be paused.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             self.session_manager.pause_session()
-            self.lock_screen()
+            self._stop_heartbeat()
+            self.show_lock_ui()
     
     def open_settings(self):
         """Open settings dialog to configure server URL."""

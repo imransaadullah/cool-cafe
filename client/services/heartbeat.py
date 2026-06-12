@@ -144,7 +144,8 @@ class HeartbeatThread(QThread):
         with open(queue_file, "w") as f:
             json.dump(queue, f)
     
-    def stop(self):
+    def stop(self, wait: bool = True):
         """Stop the heartbeat thread."""
         self.running = False
-        self.wait()
+        if wait:
+            self.wait(3000)

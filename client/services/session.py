@@ -117,25 +117,29 @@ class SessionManager:
         self.remaining_seconds = (self.end_time - _utc_now()).total_seconds()
         self._save_local_cache()
     
-    def pause_session(self):
-        """Pause the current session."""
+    def pause_session(self) -> bool:
+        """Pause the current session on the server and clear local active state."""
         if not self.is_active:
-            return
-        
+            return False
+
+        session_id = self.session_id
+        paused = False
         try:
             response = requests.post(
                 f"{self.server_url}/api/sessions/pause",
-                params={"session_id": self.session_id},
+                params={"session_id": session_id},
                 timeout=10,
             )
-            if response.status_code == 200:
-                self._clear_local_cache()
-                return True
+            paused = response.status_code == 200
         except requests.exceptions.RequestException:
             pass
-        
-        # Offline mode - store for later sync
-        return False
+
+        self.is_active = False
+        self.remaining_seconds = 0
+        self.end_time = None
+        if os.path.exists(self.local_cache_file):
+            os.remove(self.local_cache_file)
+        return paused
     
     def resume_session(self):
         """Resume a paused session."""

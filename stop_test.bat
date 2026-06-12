@@ -1,23 +1,29 @@
 @echo off
-REM Stop All CyberCafe Services
+setlocal EnableExtensions
+cd /d "%~dp0"
 
 echo.
-echo Stopping CyberCafe Services...
+echo Stopping CyberCafe services...
 echo.
 
-REM Kill Python processes (uvicorn)
-echo Stopping servers...
-taskkill /F /IM python.exe /FI "WINDOWTITLE eq CyberCafe Server*" >nul 2>&1
-taskkill /F /IM uvicorn.exe >nul 2>&1
+echo Stopping server windows...
+taskkill /F /FI "WINDOWTITLE eq CyberCafe Server*" >nul 2>&1
 
-REM Kill Node processes (dashboard)
-echo Stopping dashboard...
-taskkill /F /IM node.exe /FI "WINDOWTITLE eq CyberCafe Dashboard*" >nul 2>&1
+echo Stopping dashboard windows...
+taskkill /F /FI "WINDOWTITLE eq CyberCafe Dashboard*" >nul 2>&1
 
-REM Kill client
-echo Stopping client...
+echo Stopping client app...
 taskkill /F /IM "CyberCafe Client.exe" >nul 2>&1
-taskkill /F /IM python.exe /FI "WINDOWTITLE eq CyberCafe Client*" >nul 2>&1
+taskkill /F /IM pythonw.exe >nul 2>&1
+
+REM Dev-mode client started via python main.py
+powershell -NoProfile -Command ^
+  "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'client\\main\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+
+REM Uvicorn on port 8000 if still running outside titled window
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
+    taskkill /F /PID %%p >nul 2>&1
+)
 
 echo.
 echo All services stopped!

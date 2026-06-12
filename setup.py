@@ -40,21 +40,24 @@ def main():
     print("=" * 50)
     
     # 1. Install Python dependencies
-    print("\n[1/6] Installing Python dependencies...")
+    print("\n[1/7] Installing Python dependencies...")
     run("pip install -r local_server/requirements.txt")
+    run("pip install -r client/requirements.txt")
     run("pip install prisma")
     run("pip install python-dotenv")
     run("pip install psycopg2-binary")
-    run("pip install PyQt6")
     print("  Done")
     
     # 2. Generate Prisma client
-    print("\n[2/6] Generating Prisma client...")
-    run("python -m prisma generate")
-    print("  Done")
+    print("\n[2/7] Generating Prisma client...")
+    success, output = run("python -m prisma generate")
+    if success:
+        print("  Done")
+    else:
+        print(f"  Warning: {output.strip()[:200]}")
     
     # 3. Create database if not exists
-    print("\n[3/6] Creating database...")
+    print("\n[3/7] Creating database...")
     
     db_url = os.environ.get("DATABASE_URL", "")
     
@@ -87,7 +90,7 @@ def main():
         print(f"  Warning: Could not create database: {e}")
     
     # 4. Push schema to database
-    print("\n[4/6] Pushing schema to database...")
+    print("\n[4/7] Pushing schema to database...")
     success, output = run("python -m prisma db push")
     if success:
         print("  Done")
@@ -95,16 +98,27 @@ def main():
         print(f"  Warning: {output.strip()[:200]}")
     
     # 5. Create admin user
-    print("\n[5/6] Creating admin user...")
+    print("\n[5/7] Creating admin user...")
     run("python scripts/create_admin.py")
     print("  Done")
     
     # 6. Install dashboard dependencies
-    print("\n[6/6] Installing dashboard dependencies...")
+    print("\n[6/7] Installing dashboard dependencies...")
     dashboard_dir = Path("dashboard/frontend")
     if dashboard_dir.exists():
         run("npm install", cwd=dashboard_dir)
     print("  Done")
+
+    # 7. Quick sanity check
+    print("\n[7/7] Verifying setup...")
+    checks = [
+        ("PyQt6", "import PyQt6"),
+        ("requests", "import requests"),
+        ("prisma", "import prisma"),
+    ]
+    for name, stmt in checks:
+        ok, _ = run(f'python -c "{stmt}"')
+        print(f"  {'OK' if ok else 'MISSING'}: {name}")
     
     print("\n" + "=" * 50)
     print("  Setup Complete!")
@@ -115,10 +129,13 @@ Start the system:
   Option 1 (automated):
     start_test.bat
 
-  Option 2 (manual - 3 terminals):
-    Terminal 1: cd local_server && uvicorn app.main:app --reload --port 8000
+  Option 2 (manual):
+    Terminal 1: python -m uvicorn local_server.app.main:app --reload --host 0.0.0.0 --port 8000
     Terminal 2: cd dashboard/frontend && npm run dev
-    Terminal 3: cd client && python main.py
+    Client PC:  client\\start_client.bat   (or client\\main.pyw)
+
+  Reset a client PC:
+    client\\reset_client.bat
 
 Login:
   Username: admin

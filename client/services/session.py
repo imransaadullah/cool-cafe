@@ -30,6 +30,7 @@ class SessionManager:
         self.is_active = False
         self.remaining_seconds = 0
         self.local_cache_file = app_path("session_cache.json")
+        self.paused_cache_file = app_path("paused_session.json")
         self._load_local_cache()
     
     def _load_local_cache(self):
@@ -69,6 +70,29 @@ class SessionManager:
         self.remaining_seconds = 0
         if os.path.exists(self.local_cache_file):
             os.remove(self.local_cache_file)
+
+    def _save_paused_cache(self, session_id: int, pc_id: int, remaining_minutes: float):
+        data = {
+            "session_id": session_id,
+            "pc_id": pc_id,
+            "remaining_minutes": remaining_minutes,
+            "paused_at": _utc_now().isoformat(),
+        }
+        with open(self.paused_cache_file, "w") as f:
+            json.dump(data, f)
+
+    def _clear_paused_cache(self):
+        if os.path.exists(self.paused_cache_file):
+            os.remove(self.paused_cache_file)
+
+    def _load_paused_cache(self) -> Optional[dict]:
+        if not os.path.exists(self.paused_cache_file):
+            return None
+        try:
+            with open(self.paused_cache_file, "r") as f:
+                return json.load(f)
+        except Exception:
+            return None
     
     def redeem_code(
         self, code: str, pc_id: int
@@ -115,6 +139,7 @@ class SessionManager:
         self.is_active = True
         self.remaining_seconds = (self.end_time - _utc_now()).total_seconds()
         self._save_local_cache()
+        self._clear_paused_cache()
     
     def pause_session(self) -> Tuple[bool, str]:
         """Pause the current session on the server and clear local active state."""
@@ -131,6 +156,9 @@ class SessionManager:
             )
             if response.status_code == 200:
                 message = "Session paused"
+                data = response.json()
+                remaining = data.get("remaining_minutes", self.get_remaining_seconds() / 60)
+                self._save_paused_cache(session_id, client_config.get_pc_id(), remaining)
             else:
                 detail = response.json().get("detail", message)
                 message = detail if isinstance(detail, str) else message
@@ -158,10 +186,24 @@ class SessionManager:
             pass
         return None
 
+    def resume_for_pc(self, pc_id: int) -> Tuple[bool, str, Optional[dict]]:
+        """Resume this PC's paused session — no access code required."""
+        try:
+            response = requests.post(
+                f"{self.server_url}/api/sessions/pc/{pc_id}/resume",
+                timeout=10,
+            )
+            data = response.json()
+            if response.status_code == 200 and data.get("success"):
+                return True, data.get("message", "Session resumed"), data
+            return False, data.get("message", "Cannot resume session"), None
+        except requests.exceptions.RequestException:
+            return False, "Server offline. Please try again later.", None
+
     def resume_paused_session(
         self, session_id: int
     ) -> Tuple[bool, str, Optional[dict]]:
-        """Resume a paused session without redeeming a new code."""
+        """Resume a paused session by session id."""
         try:
             response = requests.post(
                 f"{self.server_url}/api/sessions/resume",
@@ -198,7 +240,8 @@ class SessionManager:
                 pass
         
         self._clear_local_cache()
-    
+        self._clear_paused_cache()
+
     def get_remaining_seconds(self) -> float:
         """Get remaining time in seconds."""
         if self.end_time:

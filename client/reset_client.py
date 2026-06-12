@@ -36,6 +36,7 @@ from services.paths import app_path, get_app_dir
 DATA_FILES = (
     "config.json",
     "session_cache.json",
+    "paused_session.json",
     "offline_queue.json",
     "client.log",
     "filter_config.json",

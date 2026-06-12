@@ -1,10 +1,25 @@
 import requests
 import json
 import os
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple, Union
 from services.config_manager import client_config
 from services.paths import app_path
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_datetime(value: Union[str, datetime]) -> datetime:
+    """Parse server/cache datetimes and normalize to UTC."""
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class SessionManager:
@@ -26,12 +41,11 @@ class SessionManager:
                     self.session_id = data.get("session_id")
                     end_time_str = data.get("end_time")
                     if end_time_str:
-                        self.end_time = datetime.fromisoformat(end_time_str)
-                        # Check if session is still valid
-                        if self.end_time > datetime.now():
+                        self.end_time = _parse_datetime(end_time_str)
+                        if self.end_time > _utc_now():
                             self.is_active = True
                             self.remaining_seconds = (
-                                self.end_time - datetime.now()
+                                self.end_time - _utc_now()
                             ).total_seconds()
                         else:
                             self._clear_local_cache()
@@ -94,13 +108,13 @@ class SessionManager:
         end_time_str = session_data.get("end_time")
         
         if end_time_str:
-            self.end_time = datetime.fromisoformat(end_time_str)
+            self.end_time = _parse_datetime(end_time_str)
         else:
             duration = session_data.get("duration_minutes", 60)
-            self.end_time = datetime.now() + timedelta(minutes=duration)
-        
+            self.end_time = _utc_now() + timedelta(minutes=duration)
+
         self.is_active = True
-        self.remaining_seconds = (self.end_time - datetime.now()).total_seconds()
+        self.remaining_seconds = (self.end_time - _utc_now()).total_seconds()
         self._save_local_cache()
     
     def pause_session(self):
@@ -138,7 +152,7 @@ class SessionManager:
                 data = response.json()
                 self.is_active = True
                 self.remaining_seconds = data.get("remaining_minutes", 0) * 60
-                self.end_time = datetime.now() + timedelta(seconds=self.remaining_seconds)
+                self.end_time = _utc_now() + timedelta(seconds=self.remaining_seconds)
                 self._save_local_cache()
                 return True
         except requests.exceptions.RequestException:
@@ -163,6 +177,6 @@ class SessionManager:
     def get_remaining_seconds(self) -> float:
         """Get remaining time in seconds."""
         if self.end_time:
-            remaining = (self.end_time - datetime.now()).total_seconds()
+            remaining = (self.end_time - _utc_now()).total_seconds()
             return max(0, remaining)
         return 0

@@ -12,6 +12,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 import time
 from services.config_manager import client_config
 from services.paths import app_path
+from services.session import _parse_datetime, _utc_now
 
 
 class HeartbeatThread(QThread):
@@ -88,8 +89,8 @@ class HeartbeatThread(QThread):
                     data = json.load(f)
                     end_time_str = data.get("end_time")
                     if end_time_str:
-                        end_time = datetime.fromisoformat(end_time_str)
-                        if end_time <= datetime.now():
+                        end_time = _parse_datetime(end_time_str)
+                        if end_time <= _utc_now():
                             # Session expired
                             self.lock_signal.emit()
             except Exception:

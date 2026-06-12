@@ -1,14 +1,18 @@
 import sys
 import os
+
+_CLIENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_CLIENT_DIR)
+for _path in (_REPO_ROOT, _CLIENT_DIR):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from ui.lock_screen import LockScreen
 from ui.setup_wizard import SetupWizard, check_first_run
 from services.config_manager import client_config
 from services.single_instance import SingleInstanceGuard, activate_main_window
-
-# Add parent directory to path for shared imports
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 
 def apply_theme(app, theme="dark"):

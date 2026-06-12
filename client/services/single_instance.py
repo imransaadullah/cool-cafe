@@ -1,5 +1,12 @@
 """Ensure only one client process runs; raise the existing window on relaunch."""
 
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from PyQt6.QtWidgets import QApplication
 
 from shared.qt_single_instance import QtSingleInstanceGuard

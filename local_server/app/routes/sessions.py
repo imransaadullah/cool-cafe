@@ -65,6 +65,7 @@ class CodeRedeemResponse(BaseModel):
     session_id: Optional[int] = None
     duration_minutes: Optional[float] = None
     end_time: Optional[datetime] = None
+    action: Optional[str] = None
 
 
 class ResumeInfoResponse(BaseModel):
@@ -89,10 +90,36 @@ class ResumeSessionResponse(BaseModel):
     resumes_remaining: Optional[int] = None
 
 
+def _session_resume_count(session) -> int:
+    return getattr(session, "resumeCount", None) or 0
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+async def _forfeit_paused_session(db: Prisma, session, status: str = "forfeited"):
+    """Close a paused session so a new code can be redeemed on this PC."""
+    await db.session.update(
+        where={"id": session.id},
+        data={
+            "status": status,
+            "isActive": False,
+            "endTime": utcnow(),
+        },
+    )
+    await db.pc.update(
+        where={"id": session.pcId},
+        data={"currentSessionId": None, "status": "online"},
+    )
+
+
 def _build_resume_info(session) -> ResumeInfoResponse:
     remaining = session.remainingMinutes or 0
     max_res = max_allowed_resumes(session.durationMinutes)
-    used = session.resumeCount or 0
+    used = _session_resume_count(session)
     left = resumes_remaining(session.durationMinutes, used)
 
     if remaining < MIN_REMAINING_MINUTES_TO_RESUME:
@@ -265,12 +292,15 @@ async def pause_session(session_id: int, db: Prisma = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Session is not active")
     
     # Calculate remaining time
-    elapsed = (utcnow() - session.startTime).total_seconds() / 60
+    elapsed = (utcnow() - _ensure_utc(session.startTime)).total_seconds() / 60
     paused = session.totalPausedMinutes or 0
     remaining = session.durationMinutes - elapsed + paused
-    
-    if remaining < 5:
-        raise HTTPException(status_code=400, detail="Less than 5 minutes remaining, cannot pause")
+
+    if remaining < MIN_REMAINING_MINUTES_TO_RESUME:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Less than {MIN_REMAINING_MINUTES_TO_RESUME} minutes remaining, cannot pause",
+        )
     
     # Pause session
     await db.session.update(
@@ -311,7 +341,7 @@ async def resume_session(session_id: int, db: Prisma = Depends(get_db)):
         total_paused += paused_duration
 
     new_start_time = utcnow() - timedelta(minutes=session.durationMinutes - remaining)
-    new_resume_count = (session.resumeCount or 0) + 1
+    new_resume_count = _session_resume_count(session) + 1
     end_time = utcnow() + timedelta(minutes=remaining)
 
     await db.session.update(
@@ -408,14 +438,7 @@ async def redeem_code(request: CodeRedeemRequest, db: Prisma = Depends(get_db)):
     code = await db.code.find_unique(where={"code": request.code})
     if not code:
         return CodeRedeemResponse(success=False, message="Invalid code")
-    
-    if code.isUsed:
-        return CodeRedeemResponse(success=False, message="Code already used")
-    
-    # Check if code is expired
-    if code.expiresAt and code.expiresAt < utcnow():
-        return CodeRedeemResponse(success=False, message="Code expired")
-    
+
     # Check if PC exists
     pc = await db.pc.find_unique(where={"id": request.pc_id})
     if not pc:
@@ -423,23 +446,66 @@ async def redeem_code(request: CodeRedeemRequest, db: Prisma = Depends(get_db)):
 
     if pc.currentSessionId:
         existing = await db.session.find_unique(where={"id": pc.currentSessionId})
-        if existing and existing.isActive and existing.status == "paused":
-            info = _build_resume_info(existing)
-            if info.can_resume:
-                return CodeRedeemResponse(
-                    success=False,
-                    message="Session paused — click Resume Session to continue",
-                )
-            if (existing.remainingMinutes or 0) >= MIN_REMAINING_MINUTES_TO_RESUME:
-                return CodeRedeemResponse(
-                    success=False,
-                    message=info.message or "Cannot start a new session yet",
-                )
-        elif existing and existing.isActive and existing.status == "active":
+        if existing and existing.isActive and existing.status == "active":
             return CodeRedeemResponse(
                 success=False,
                 message="PC already has an active session",
             )
+        if existing and existing.isActive and existing.status == "paused":
+            info = _build_resume_info(existing)
+            same_code = code.isUsed and existing.codeId == code.id
+            if same_code and info.can_resume:
+                return CodeRedeemResponse(
+                    success=False,
+                    message="Session paused — click Resume Session to continue",
+                    action="resume",
+                    session_id=existing.id,
+                )
+            if not code.isUsed:
+                await _forfeit_paused_session(db, existing)
+                pc = await db.pc.find_unique(where={"id": request.pc_id})
+            elif info.can_resume:
+                return CodeRedeemResponse(
+                    success=False,
+                    message="Session paused — click Resume Session to continue",
+                    action="resume",
+                    session_id=existing.id,
+                )
+            elif (existing.remainingMinutes or 0) >= MIN_REMAINING_MINUTES_TO_RESUME:
+                return CodeRedeemResponse(
+                    success=False,
+                    message=info.message or "Cannot start a new session yet",
+                    action="resume",
+                    session_id=existing.id,
+                )
+
+    if code.isUsed:
+        paused_for_code = await db.session.find_first(
+            where={
+                "codeId": code.id,
+                "pcId": request.pc_id,
+                "isActive": True,
+                "status": "paused",
+            }
+        )
+        if paused_for_code:
+            info = _build_resume_info(paused_for_code)
+            if info.can_resume:
+                await db.pc.update(
+                    where={"id": request.pc_id},
+                    data={"currentSessionId": paused_for_code.id},
+                )
+                return CodeRedeemResponse(
+                    success=False,
+                    message="Session paused — click Resume Session to continue",
+                    action="resume",
+                    session_id=paused_for_code.id,
+                )
+        return CodeRedeemResponse(success=False, message="Code already used")
+
+    # Check if code is expired
+    if code.expiresAt and code.expiresAt < utcnow():
+        return CodeRedeemResponse(success=False, message="Code expired")
     
     # Mark code as used
     await db.code.update(
@@ -454,6 +520,7 @@ async def redeem_code(request: CodeRedeemRequest, db: Prisma = Depends(get_db)):
             "branchId": code.branchId,
             "codeId": code.id,
             "durationMinutes": code.durationMinutes,
+            "resumeCount": 0,
             "localId": str(uuid.uuid4()),
             "startTime": utcnow(),
             "endTime": utcnow() + timedelta(minutes=code.durationMinutes),

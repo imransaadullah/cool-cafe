@@ -87,8 +87,7 @@ class SessionManager:
             
             if response.status_code == 200 and data.get("success"):
                 return True, data.get("message"), data
-            else:
-                return False, data.get("message", "Failed to redeem code"), None
+            return False, data.get("message", "Failed to redeem code"), data
         
         except requests.exceptions.RequestException:
             # Offline mode - try to use cached code validation

@@ -34,6 +34,7 @@ class LockScreen(QMainWindow):
         self.setup_ui()
         self.setup_timer()
         self.restore_active_session()
+        self.refresh_resume_status()
     
     def setup_ui(self):
         self.setWindowTitle("CyberCafe")
@@ -214,7 +215,7 @@ class LockScreen(QMainWindow):
         success, message, session_data = self.session_manager.redeem_code(
             code, self.current_pc_id
         )
-        
+
         if success:
             self.session_manager.start_session(session_data)
             self.start_heartbeat()
@@ -222,7 +223,14 @@ class LockScreen(QMainWindow):
             self.enter_session_mode()
         else:
             self.code_status_label.setText(message)
-            # Store failed attempt for offline queue
+            if session_data and session_data.get("action") == "resume":
+                self.refresh_resume_status()
+                if self.pending_resume and self.pending_resume.get("can_resume"):
+                    self.code_status_label.setText(
+                        "Session paused — click Resume Session below"
+                    )
+            elif "resume" in (message or "").lower():
+                self.refresh_resume_status()
             self.offline_manager.queue_action(
                 "code_attempt", {"code": code, "pc_id": self.current_pc_id}
             )
@@ -260,20 +268,31 @@ class LockScreen(QMainWindow):
             logins_left = info.get("resumes_remaining", 0)
             max_res = info.get("max_resumes", 0)
             self.resume_btn.setVisible(True)
+            self.resume_btn.setEnabled(True)
             self.resume_btn.setText(
                 f"RESUME SESSION ({self._format_remaining(remaining)} left)"
             )
             self.resume_info_label.setText(
-                f"{logins_left} of {max_res} login(s) remaining"
+                f"{logins_left} of {max_res} re-login(s) remaining"
+            )
+            self.resume_info_label.setStyleSheet(
+                "color: #4ecdc4; font-size: 13px; background: transparent;"
+            )
+            self.resume_info_label.setVisible(True)
+        elif info and info.get("session_id"):
+            self.resume_btn.setVisible(True)
+            self.resume_btn.setEnabled(False)
+            self.resume_btn.setText("RESUME SESSION")
+            self.resume_info_label.setText(
+                info.get("message", "Cannot resume this session")
+            )
+            self.resume_info_label.setStyleSheet(
+                "color: #ff6b6b; font-size: 13px; background: transparent;"
             )
             self.resume_info_label.setVisible(True)
         else:
             self.resume_btn.setVisible(False)
-            if info and info.get("session_id") and info.get("message"):
-                self.resume_info_label.setText(info["message"])
-                self.resume_info_label.setVisible(True)
-            else:
-                self.resume_info_label.setVisible(False)
+            self.resume_info_label.setVisible(False)
     
     def restore_active_session(self):
         """Resume UI and heartbeat if a valid session was cached."""

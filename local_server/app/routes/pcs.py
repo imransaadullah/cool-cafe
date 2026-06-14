@@ -87,6 +87,23 @@ class PCCommandRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class AppInventoryItem(BaseModel):
+    name: str
+    exe_name: str
+    path: Optional[str] = None
+    source: Optional[str] = None
+
+
+class AppInventoryUpload(BaseModel):
+    apps: List[AppInventoryItem]
+    scanned_at: Optional[datetime] = None
+
+
+class AppPolicyToggleRequest(BaseModel):
+    exe_name: str
+    list: str  # allowed, blocked, none
+
+
 class BanRequest(BaseModel):
     reason: Optional[str] = None
 
@@ -662,6 +679,134 @@ async def force_logout_pc(
 async def refresh_rules_pc(pc_id: int, db: Prisma = Depends(get_db)):
     await _queue_pc_command(db, pc_id, "refresh_rules")
     return {"message": "Refresh rules queued"}
+
+
+@router.post("/{pc_id}/commands/scan-apps")
+async def scan_apps_pc(pc_id: int, db: Prisma = Depends(get_db)):
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if not pc:
+        raise HTTPException(status_code=404, detail="PC not found")
+    if not pc.clientRunning:
+        raise HTTPException(status_code=409, detail="Client is not running on this PC")
+
+    await _queue_pc_command(db, pc_id, "scan_apps")
+    return {"message": "App scan queued"}
+
+
+@router.post("/{pc_id}/apps/inventory")
+async def upload_app_inventory(
+    pc_id: int,
+    data: AppInventoryUpload,
+    db: Prisma = Depends(get_db),
+):
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if not pc:
+        raise HTTPException(status_code=404, detail="PC not found")
+
+    config = parse_pc_config(pc.config)
+    scanned_at = data.scanned_at or datetime.now(timezone.utc)
+    config["app_inventory"] = {
+        "scanned_at": scanned_at.isoformat() if isinstance(scanned_at, datetime) else scanned_at,
+        "apps": [item.model_dump() for item in data.apps],
+    }
+
+    await db.pc.update(
+        where={"id": pc_id},
+        data={"config": dump_pc_config(config)},
+    )
+    return {
+        "message": "App inventory updated",
+        "count": len(data.apps),
+        "scanned_at": config["app_inventory"]["scanned_at"],
+    }
+
+
+@router.get("/{pc_id}/apps")
+async def get_pc_apps(pc_id: int, db: Prisma = Depends(get_db)):
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if not pc:
+        raise HTTPException(status_code=404, detail="PC not found")
+
+    config = parse_pc_config(pc.config)
+    inventory = config.get("app_inventory") or {}
+    pc_policy = config.get("app_policy") or {}
+    client_config = await build_client_config(db, pc)
+
+    allowed = {name.lower() for name in pc_policy.get("allowed_apps", [])}
+    blocked = {name.lower() for name in pc_policy.get("blocked_apps", [])}
+    effective_allowed = {
+        name.lower() for name in client_config.get("app_policy", {}).get("allowed_apps", [])
+    }
+    effective_blocked = {
+        name.lower() for name in client_config.get("app_policy", {}).get("blocked_apps", [])
+    }
+
+    apps = inventory.get("apps") or []
+    enriched = []
+    for app in apps:
+        exe_name = str(app.get("exe_name", "")).lower()
+        status = "none"
+        if exe_name in allowed:
+            status = "allowed_pc"
+        elif exe_name in blocked:
+            status = "blocked_pc"
+        elif exe_name in effective_allowed:
+            status = "allowed_effective"
+        elif exe_name in effective_blocked:
+            status = "blocked_effective"
+        enriched.append({**app, "policy_status": status})
+
+    return {
+        "pc_id": pc_id,
+        "client_running": pc.clientRunning,
+        "scanned_at": inventory.get("scanned_at"),
+        "apps": enriched,
+        "pc_app_policy": pc_policy,
+        "effective_app_policy": client_config.get("app_policy"),
+    }
+
+
+@router.post("/{pc_id}/app-policy/toggle")
+async def toggle_pc_app_policy(
+    pc_id: int,
+    data: AppPolicyToggleRequest,
+    db: Prisma = Depends(get_db),
+):
+    if data.list not in ("allowed", "blocked", "none"):
+        raise HTTPException(status_code=400, detail="list must be allowed, blocked, or none")
+
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if not pc:
+        raise HTTPException(status_code=404, detail="PC not found")
+
+    exe_name = data.exe_name.strip().lower()
+    if not exe_name:
+        raise HTTPException(status_code=400, detail="exe_name is required")
+
+    config = parse_pc_config(pc.config)
+    policy = config.get("app_policy") or {}
+    allowed = [name.lower() for name in policy.get("allowed_apps", [])]
+    blocked = [name.lower() for name in policy.get("blocked_apps", [])]
+
+    allowed = [name for name in allowed if name != exe_name]
+    blocked = [name for name in blocked if name != exe_name]
+
+    if data.list == "allowed":
+        allowed.append(exe_name)
+    elif data.list == "blocked":
+        blocked.append(exe_name)
+
+    policy["allowed_apps"] = sorted(set(allowed))
+    policy["blocked_apps"] = sorted(set(blocked))
+    config["app_policy"] = policy
+
+    await db.pc.update(
+        where={"id": pc_id},
+        data={"config": dump_pc_config(config)},
+    )
+    await _queue_pc_command(db, pc_id, "refresh_rules")
+
+    return {"message": "App policy updated", "app_policy": policy}
 
 
 @router.delete("/{pc_id}")

@@ -94,6 +94,15 @@ class SecurityController(QObject):
                 minutes = float(payload.get("additional_minutes", 0))
                 if minutes > 0:
                     self.extend_session.emit(minutes)
+            elif cmd_type == "scan_apps":
+                import threading
+                from services.app_inventory import scan_and_upload
+
+                threading.Thread(
+                    target=scan_and_upload,
+                    args=(client_config.get_pc_id(),),
+                    daemon=True,
+                ).start()
 
     def _apply_filtering(self):
         if not self.content_filter:

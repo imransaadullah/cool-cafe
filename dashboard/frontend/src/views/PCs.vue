@@ -111,7 +111,7 @@
       v-if="showAddModal || editingPC"
       class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
     >
-      <div class="card w-full max-w-md">
+      <div class="card w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <h2 class="text-xl font-semibold mb-4">
           {{ editingPC ? 'Edit PC' : 'Add New PC' }}
         </h2>
@@ -195,9 +195,84 @@
               <textarea
                 v-model="blockedAppsText"
                 class="input"
-                rows="3"
+                rows="2"
                 placeholder="taskmgr.exe"
               />
+            </div>
+
+            <div class="mb-3 border rounded-lg p-3 bg-gray-50">
+              <div class="flex items-center justify-between mb-3 gap-2">
+                <div>
+                  <h4 class="font-medium">Apps on this PC</h4>
+                  <p class="text-xs text-gray-500">
+                    <span v-if="scannedAt">Last scan: {{ formatDate(scannedAt) }}</span>
+                    <span v-else>Not scanned yet — request a scan from the client</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="text-sm px-3 py-1 rounded bg-indigo-100 text-indigo-700 whitespace-nowrap"
+                  :disabled="scanLoading || !editingPC.client_running"
+                  @click="scanPcApps"
+                >
+                  {{ scanLoading ? 'Scanning…' : 'Scan PC' }}
+                </button>
+              </div>
+
+              <input
+                v-model="appSearch"
+                type="text"
+                class="input mb-3"
+                placeholder="Search apps…"
+              />
+
+              <div class="max-h-56 overflow-y-auto space-y-2">
+                <div
+                  v-for="app in filteredPcApps"
+                  :key="app.exe_name"
+                  class="flex items-center justify-between gap-2 p-2 bg-white rounded border"
+                >
+                  <div class="min-w-0">
+                    <div class="font-medium truncate">{{ app.name }}</div>
+                    <div class="text-xs text-gray-500 font-mono">{{ app.exe_name }}</div>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <span
+                      class="text-xs px-2 py-0.5 rounded-full"
+                      :class="appPolicyBadgeClass(app.policy_status)"
+                    >
+                      {{ appPolicyLabel(app.policy_status) }}
+                    </span>
+                    <button
+                      type="button"
+                      class="text-xs px-2 py-1 rounded bg-green-100 text-green-700"
+                      @click="toggleAppPolicy(app.exe_name, 'allowed')"
+                    >
+                      Allow
+                    </button>
+                    <button
+                      type="button"
+                      class="text-xs px-2 py-1 rounded bg-red-100 text-red-700"
+                      @click="toggleAppPolicy(app.exe_name, 'blocked')"
+                    >
+                      Block
+                    </button>
+                    <button
+                      type="button"
+                      class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600"
+                      @click="toggleAppPolicy(app.exe_name, 'none')"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div
+                  v-if="filteredPcApps.length === 0"
+                  class="text-center text-sm text-gray-500 py-4"
+                >
+                  No apps to show. Scan the PC while the client is running.
+                </div>
+              </div>
             </div>
           </div>
           
@@ -267,7 +342,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '@/services/api'
 
 const pcs = ref([])
@@ -285,6 +360,11 @@ const appPolicy = ref({
 })
 const allowedAppsText = ref('')
 const blockedAppsText = ref('')
+const pcApps = ref([])
+const appSearch = ref('')
+const scannedAt = ref(null)
+const scanLoading = ref(false)
+let scanPollTimer = null
 
 const formData = ref({
   name: '',
@@ -339,9 +419,124 @@ const sessionClass = (pc) => {
   return 'text-green-600'
 }
 
+const filteredPcApps = computed(() => {
+  const query = appSearch.value.trim().toLowerCase()
+  if (!query) return pcApps.value
+  return pcApps.value.filter(
+    (app) =>
+      app.name.toLowerCase().includes(query) ||
+      app.exe_name.toLowerCase().includes(query)
+  )
+})
+
+const syncPolicyTextareas = (policy) => {
+  allowedAppsText.value = (policy.allowed_apps || []).join('\n')
+  blockedAppsText.value = (policy.blocked_apps || []).join('\n')
+}
+
+const appPolicyLabel = (status) => {
+  const labels = {
+    allowed_pc: 'Allowed',
+    blocked_pc: 'Blocked',
+    allowed_effective: 'Allowed (branch)',
+    blocked_effective: 'Blocked (branch)',
+    none: 'Default',
+  }
+  return labels[status] || 'Default'
+}
+
+const appPolicyBadgeClass = (status) => {
+  if (status === 'allowed_pc' || status === 'allowed_effective') {
+    return 'bg-green-100 text-green-700'
+  }
+  if (status === 'blocked_pc' || status === 'blocked_effective') {
+    return 'bg-red-100 text-red-700'
+  }
+  return 'bg-gray-100 text-gray-600'
+}
+
+const fetchPcApps = async (pcId) => {
+  try {
+    const response = await api.get(`/api/pcs/${pcId}/apps`)
+    pcApps.value = response.data.apps || []
+    scannedAt.value = response.data.scanned_at || null
+    if (response.data.pc_app_policy) {
+      appPolicy.value = {
+        mode: response.data.pc_app_policy.mode || appPolicy.value.mode,
+        allowed_apps: response.data.pc_app_policy.allowed_apps || [],
+        blocked_apps: response.data.pc_app_policy.blocked_apps || [],
+      }
+      syncPolicyTextareas(appPolicy.value)
+    }
+    return response.data
+  } catch (error) {
+    console.error('Failed to fetch PC apps:', error)
+    return null
+  }
+}
+
+const stopScanPoll = () => {
+  if (scanPollTimer) {
+    clearInterval(scanPollTimer)
+    scanPollTimer = null
+  }
+  scanLoading.value = false
+}
+
+const scanPcApps = async () => {
+  if (!editingPC.value) return
+
+  const previousScan = scannedAt.value
+  scanLoading.value = true
+
+  try {
+    await api.post(`/api/pcs/${editingPC.value.id}/commands/scan-apps`)
+
+    let attempts = 0
+    stopScanPoll()
+    scanLoading.value = true
+    scanPollTimer = setInterval(async () => {
+      attempts += 1
+      const data = await fetchPcApps(editingPC.value.id)
+      if (
+        (data?.scanned_at && data.scanned_at !== previousScan) ||
+        attempts >= 15
+      ) {
+        stopScanPoll()
+      }
+    }, 2000)
+  } catch (error) {
+    console.error('Failed to scan PC apps:', error)
+    stopScanPoll()
+    alert(error.response?.data?.detail || 'Could not start app scan')
+  }
+}
+
+const toggleAppPolicy = async (exeName, list) => {
+  if (!editingPC.value) return
+
+  try {
+    const response = await api.post(
+      `/api/pcs/${editingPC.value.id}/app-policy/toggle`,
+      { exe_name: exeName, list }
+    )
+    appPolicy.value = {
+      ...appPolicy.value,
+      ...response.data.app_policy,
+    }
+    syncPolicyTextareas(appPolicy.value)
+    await fetchPcApps(editingPC.value.id)
+  } catch (error) {
+    console.error('Failed to update app policy:', error)
+  }
+}
+
 const editPC = async (pc) => {
   editingPC.value = pc
   formData.value = { ...pc }
+  appSearch.value = ''
+  pcApps.value = []
+  scannedAt.value = null
   try {
     const response = await api.get(`/api/pcs/${pc.id}/config`)
     const policy = response.data.pc_app_policy || {}
@@ -350,8 +545,8 @@ const editPC = async (pc) => {
       allowed_apps: policy.allowed_apps || [],
       blocked_apps: policy.blocked_apps || [],
     }
-    allowedAppsText.value = appPolicy.value.allowed_apps.join('\n')
-    blockedAppsText.value = appPolicy.value.blocked_apps.join('\n')
+    syncPolicyTextareas(appPolicy.value)
+    await fetchPcApps(pc.id)
   } catch (error) {
     console.error('Failed to load PC config:', error)
   }
@@ -374,11 +569,15 @@ const saveAppPolicy = async (pcId) => {
 }
 
 const closeModal = () => {
+  stopScanPoll()
   showAddModal.value = false
   editingPC.value = null
   appPolicy.value = { mode: 'blocklist', allowed_apps: [], blocked_apps: [] }
   allowedAppsText.value = ''
   blockedAppsText.value = ''
+  pcApps.value = []
+  appSearch.value = ''
+  scannedAt.value = null
   formData.value = {
     name: '',
     pc_number: 1,
@@ -469,4 +668,8 @@ const generateCode = async () => {
 }
 
 onMounted(fetchPCs)
+
+onUnmounted(() => {
+  stopScanPoll()
+})
 </script>

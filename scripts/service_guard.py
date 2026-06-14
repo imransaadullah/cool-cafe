@@ -22,15 +22,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from shared.config import settings
+
 SERVICES = {
     "server": {
-        "port": 8000,
-        "health_url": "http://127.0.0.1:8000/api/health",
+        "port": settings.PORT,
+        "health_url": f"http://127.0.0.1:{settings.PORT}/api/health",
         "window_title": "CyberCafe Server",
     },
     "dashboard": {
-        "port": 3000,
-        "health_url": "http://127.0.0.1:3000",
+        "port": settings.DASHBOARD_PORT,
+        "health_url": f"http://127.0.0.1:{settings.DASHBOARD_PORT}",
         "window_title": "CyberCafe Dashboard",
     },
 }

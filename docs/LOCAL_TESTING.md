@@ -99,7 +99,7 @@ python main.py
 |---------|-----|-------------|
 | Local Server API | http://localhost:8000 | FastAPI backend |
 | API Docs | http://localhost:8000/docs | Swagger UI |
-| Dashboard | http://localhost:3000 | Vue.js admin panel |
+| Dashboard | http://localhost:7842 | Vue.js admin panel |
 | Client | Desktop app | PyQt6 lock screen |
 
 ## Default Credentials
@@ -112,7 +112,7 @@ python main.py
 ## Testing Workflow
 
 ### 1. Login to Dashboard
-- Open http://localhost:3000
+- Open http://localhost:7842
 - Login with admin/admin123
 
 ### 2. Create a Branch

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    DASHBOARD_PORT: int = 7842
     
     # Security
     SECRET_KEY: str = "your-secret-key-change-in-production"
@@ -26,7 +27,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     
     # CORS
-    CORS_ORIGINS: list = ["http://localhost:3000", "http://localhost:8080"]
+    CORS_ORIGINS: list = ["http://localhost:7842", "http://localhost:8080"]
     
     # Sync
     SYNC_ENABLED: bool = True

@@ -447,7 +447,7 @@ The API does not currently implement rate limiting. For production use, consider
 ## CORS
 
 CORS is enabled for the following origins:
-- `http://localhost:3000`
+- `http://localhost:7842`
 - `http://localhost:8080`
 
 Configure additional origins in the `CORS_ORIGINS` environment variable.

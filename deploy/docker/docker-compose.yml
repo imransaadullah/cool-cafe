@@ -66,10 +66,10 @@ services:
     volumes:
       - ../../dashboard/frontend:/app
     ports:
-      - "3000:3000"
+      - "7842:7842"
     networks:
       - cybercafe
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 7842"
 
 volumes:
   local_db_data:

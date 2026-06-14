@@ -56,7 +56,7 @@ echo   Services Running
 echo ========================================
 echo.
 echo   Server:     http://localhost:8000
-echo   Dashboard:  http://localhost:3000
+echo   Dashboard:  http://localhost:7842
 echo   API Docs:   http://localhost:8000/docs
 echo   Health:     http://localhost:8000/api/health
 echo.

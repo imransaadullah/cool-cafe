@@ -199,7 +199,7 @@ TERMINAL 3 - Client (optional):
 Access Points:
   • Server API:  http://localhost:8000
   • API Docs:    http://localhost:8000/docs
-  • Dashboard:   http://localhost:3000
+  • Dashboard:   http://localhost:7842
 
 Default Login:
   • Username: admin
@@ -228,7 +228,7 @@ Default Login:
         
         print("Services started!")
         print("  • Server: http://localhost:8000")
-        print("  • Dashboard: http://localhost:3000")
+        print("  • Dashboard: http://localhost:7842")
         print("\nPress Ctrl+C to stop")
         
         try:

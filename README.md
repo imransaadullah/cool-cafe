@@ -40,7 +40,7 @@ cd deploy/docker
 docker-compose up -d
 
 # Access dashboard
-open http://localhost:3000
+open http://localhost:7842
 ```
 
 ### Option 2: Manual Setup
@@ -127,7 +127,7 @@ See [docs/api.md](docs/api.md) for detailed API documentation.
 | DEPLOYMENT_MODE | local_only, hybrid, global_only | local_only |
 | HOST | Server host | 0.0.0.0 |
 | PORT | Server port | 8000 |
-| CORS_ORIGINS | Allowed origins | ["http://localhost:3000"] |
+| CORS_ORIGINS | Allowed origins | ["http://localhost:7842"] |
 | PAYSTACK_SECRET_KEY | Paystack secret key | - |
 | PAYSTACK_PUBLIC_KEY | Paystack public key | - |
 | KONGA_PAY_MERCHANT_ID | KongaPay merchant ID | - |

@@ -49,7 +49,7 @@ SECRET_KEY={os.urandom(32).hex()}
 HOST={server_url}
 PORT={port}
 DEPLOYMENT_MODE=local_only
-CORS_ORIGINS=["http://localhost:3000"]
+CORS_ORIGINS=["http://localhost:7842"]
 """
     
     with open(".env", "w") as f:
@@ -109,7 +109,7 @@ def setup_global_server():
 SECRET_KEY={os.urandom(32).hex()}
 HOST={server_url}
 PORT={port}
-CORS_ORIGINS=["http://localhost:3000"]
+CORS_ORIGINS=["http://localhost:7842"]
 """
     
     with open(".env", "w") as f:
@@ -244,7 +244,7 @@ DATABASE_URL=postgresql://postgres:postgres@local_db:5432/cybercafe
 ║  Services running:                                         ║
 ║    - Local Server: http://localhost:8000                   ║
 ║    - Global Server: http://localhost:8001                   ║
-║    - Dashboard: http://localhost:3000                       ║
+║    - Dashboard: http://localhost:7842                       ║
 ║    - PostgreSQL: localhost:5432                             ║
 ║                                                              ║
 ║  View logs:                                                 ║

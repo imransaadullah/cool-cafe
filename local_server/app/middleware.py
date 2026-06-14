@@ -131,7 +131,7 @@ class CORSMiddleware(BaseHTTPMiddleware):
     
     def __init__(self, app, allowed_origins: list = None):
         super().__init__(app)
-        self.allowed_origins = allowed_origins or ["http://localhost:3000"]
+        self.allowed_origins = allowed_origins or ["http://localhost:7842"]
     
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS":

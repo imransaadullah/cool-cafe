@@ -1,8 +1,3 @@
-from .config import settings
-from .database import db, get_db
+"""Shared utilities used by the server and client."""
 
-__all__ = [
-    "settings",
-    "db",
-    "get_db",
-]
+__all__: list[str] = []

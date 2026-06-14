@@ -7,6 +7,12 @@ for _path in (_REPO_ROOT, _CLIENT_DIR):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
+if "--reset" in sys.argv:
+    from reset_client import reset_client
+
+    reset_client(skip_confirm="--yes" in sys.argv or "-y" in sys.argv)
+    sys.argv = [arg for arg in sys.argv if arg not in ("--reset", "--yes", "-y")]
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from ui.lock_screen import LockScreen
@@ -138,11 +144,6 @@ def show_lock_screen(app):
 
 
 def main():
-    if "--reset" in sys.argv:
-        from reset_client import reset_client
-        reset_client(skip_confirm="--yes" in sys.argv or "-y" in sys.argv)
-        sys.argv = [arg for arg in sys.argv if arg not in ("--reset", "--yes", "-y")]
-
     try:
         app = QApplication(sys.argv)
         app.setApplicationName("CyberCafe Client")

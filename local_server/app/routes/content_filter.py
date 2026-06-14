@@ -39,9 +39,19 @@ async def get_filter_status(db: Prisma = Depends(get_db)):
 
 
 @router.get("/rules")
-async def get_all_rules(db: Prisma = Depends(get_db)):
-    """Get all filter rules."""
-    rules = await db.filterrule.find_many(where={"isActive": True})
+async def get_all_rules(branch_id: int = None, db: Prisma = Depends(get_db)):
+    """Get filter rules, optionally scoped to a branch (+ global rules)."""
+    where = {"isActive": True}
+    if branch_id is not None:
+        where = {
+            "isActive": True,
+            "OR": [
+                {"branchId": branch_id},
+                {"branchId": None},
+            ],
+        }
+
+    rules = await db.filterrule.find_many(where=where)
     
     return {
         "dns": [

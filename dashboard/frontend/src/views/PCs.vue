@@ -61,7 +61,27 @@
           </div>
         </div>
         
-        <div class="mt-4 pt-4 border-t flex justify-end space-x-2">
+        <div class="mt-4 pt-4 border-t flex flex-wrap justify-end gap-2">
+          <button
+            v-if="pc.has_active_session"
+            @click.stop="forceLock(pc)"
+            class="text-sm px-3 py-1 rounded bg-amber-100 text-amber-700"
+          >
+            Force Lock
+          </button>
+          <button
+            v-if="pc.has_active_session"
+            @click.stop="forceLogout(pc)"
+            class="text-sm px-3 py-1 rounded bg-orange-100 text-orange-700"
+          >
+            Force Logout
+          </button>
+          <button
+            @click.stop="refreshRules(pc)"
+            class="text-sm px-3 py-1 rounded bg-purple-100 text-purple-700"
+          >
+            Refresh Rules
+          </button>
           <button
             v-if="!pc.is_banned"
             @click.stop="banPC(pc)"
@@ -146,6 +166,40 @@
               placeholder="e.g., AA:BB:CC:DD:EE:FF"
             />
           </div>
+
+          <div v-if="editingPC" class="mb-4 border-t pt-4">
+            <h3 class="font-medium mb-3">Per-PC App Policy</h3>
+            <div class="mb-3">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Mode</label>
+              <select v-model="appPolicy.mode" class="input">
+                <option value="blocklist">Blocklist</option>
+                <option value="allowlist">Allowlist</option>
+                <option value="hybrid">Hybrid</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                Allowed apps (one per line, e.g. steam.exe)
+              </label>
+              <textarea
+                v-model="allowedAppsText"
+                class="input"
+                rows="3"
+                placeholder="steam.exe"
+              />
+            </div>
+            <div class="mb-3">
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                Blocked apps (one per line)
+              </label>
+              <textarea
+                v-model="blockedAppsText"
+                class="input"
+                rows="3"
+                placeholder="taskmgr.exe"
+              />
+            </div>
+          </div>
           
           <div class="flex justify-end space-x-2">
             <button
@@ -224,6 +278,14 @@ const selectedPCForCode = ref(null)
 const codeDuration = ref(60)
 const generatedCode = ref('')
 
+const appPolicy = ref({
+  mode: 'blocklist',
+  allowed_apps: [],
+  blocked_apps: [],
+})
+const allowedAppsText = ref('')
+const blockedAppsText = ref('')
+
 const formData = ref({
   name: '',
   pc_number: 1,
@@ -277,14 +339,46 @@ const sessionClass = (pc) => {
   return 'text-green-600'
 }
 
-const editPC = (pc) => {
+const editPC = async (pc) => {
   editingPC.value = pc
   formData.value = { ...pc }
+  try {
+    const response = await api.get(`/api/pcs/${pc.id}/config`)
+    const policy = response.data.pc_app_policy || {}
+    appPolicy.value = {
+      mode: policy.mode || 'blocklist',
+      allowed_apps: policy.allowed_apps || [],
+      blocked_apps: policy.blocked_apps || [],
+    }
+    allowedAppsText.value = appPolicy.value.allowed_apps.join('\n')
+    blockedAppsText.value = appPolicy.value.blocked_apps.join('\n')
+  } catch (error) {
+    console.error('Failed to load PC config:', error)
+  }
+}
+
+const parseAppsList = (text) =>
+  text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+const saveAppPolicy = async (pcId) => {
+  await api.put(`/api/pcs/${pcId}/app-policy`, {
+    app_policy: {
+      mode: appPolicy.value.mode,
+      allowed_apps: parseAppsList(allowedAppsText.value),
+      blocked_apps: parseAppsList(blockedAppsText.value),
+    },
+  })
 }
 
 const closeModal = () => {
   showAddModal.value = false
   editingPC.value = null
+  appPolicy.value = { mode: 'blocklist', allowed_apps: [], blocked_apps: [] }
+  allowedAppsText.value = ''
+  blockedAppsText.value = ''
   formData.value = {
     name: '',
     pc_number: 1,
@@ -298,6 +392,7 @@ const savePC = async () => {
   try {
     if (editingPC.value) {
       await api.put(`/api/pcs/${editingPC.value.id}`, formData.value)
+      await saveAppPolicy(editingPC.value.id)
     } else {
       await api.post('/api/pcs/', formData.value)
     }
@@ -305,6 +400,32 @@ const savePC = async () => {
     fetchPCs()
   } catch (error) {
     console.error('Failed to save PC:', error)
+  }
+}
+
+const forceLock = async (pc) => {
+  try {
+    await api.post(`/api/pcs/${pc.id}/commands/force-lock`)
+    fetchPCs()
+  } catch (error) {
+    console.error('Failed to force lock:', error)
+  }
+}
+
+const forceLogout = async (pc) => {
+  try {
+    await api.post(`/api/pcs/${pc.id}/commands/force-logout`)
+    fetchPCs()
+  } catch (error) {
+    console.error('Failed to force logout:', error)
+  }
+}
+
+const refreshRules = async (pc) => {
+  try {
+    await api.post(`/api/pcs/${pc.id}/commands/refresh-rules`)
+  } catch (error) {
+    console.error('Failed to refresh rules:', error)
   }
 }
 

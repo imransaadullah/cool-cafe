@@ -38,6 +38,7 @@ Name: "autostart"; Description: "Start with Windows"; GroupDescription: "Startup
 [Files]
 Source: "dist\CyberCafe Client\CyberCafe Client.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\CyberCafe Client\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\client\uninstall_cleanup.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "config.example.json"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
@@ -48,6 +49,9 @@ Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Fil
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+Filename: "{sys}\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""& python '{app}\uninstall_cleanup.py' '{app}'"""; Flags: runhidden; RunOnceId: "CyberCafeCleanup"
 
 [Registry]
 ; Auto-start on boot

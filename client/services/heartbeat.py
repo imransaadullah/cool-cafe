@@ -26,6 +26,7 @@ class HeartbeatThread(QThread):
     ban_signal = pyqtSignal()
     alarm_signal = pyqtSignal(dict)
     config_update = pyqtSignal(dict)
+    command_signal = pyqtSignal(list)
 
     def __init__(self, pc_id: int, server_url: str = None, access_code: str = None):
         super().__init__()
@@ -72,6 +73,9 @@ class HeartbeatThread(QThread):
 
                     if data.get("config_updates"):
                         self.config_update.emit(data["config_updates"])
+
+                    if data.get("commands"):
+                        self.command_signal.emit(data["commands"])
 
                 if self.session_active and self.access_code:
                     self._send_session_heartbeat()

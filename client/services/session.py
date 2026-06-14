@@ -86,3 +86,7 @@ class SessionManager:
 
     def get_remaining_seconds(self) -> float:
         return max(0, self.remaining_seconds)
+
+    def extend_local(self, additional_seconds: float):
+        if self.is_active and additional_seconds > 0:
+            self.remaining_seconds += additional_seconds

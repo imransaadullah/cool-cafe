@@ -2,12 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from prisma import Prisma
 from shared.database import get_db
 from shared.orm_model import ORMModel
+from shared.pc_config import dump_pc_config, parse_pc_config, pop_pending_commands, queue_command
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 import secrets
 import string
 import random
+
+from ..services.client_config_builder import build_client_config
 
 router = APIRouter()
 
@@ -64,7 +67,24 @@ class HeartbeatResponse(BaseModel):
     server_time: datetime
     is_banned: bool
     alarm_active: bool
+    commands: List[Dict[str, Any]] = []
+    app_policy: Optional[dict] = None
+    client_mode: Optional[str] = None
     config_updates: Optional[dict] = None
+
+
+class AppPolicyUpdate(BaseModel):
+    mode: Optional[str] = None
+    allowed_apps: Optional[List[str]] = None
+    blocked_apps: Optional[List[str]] = None
+
+
+class PCAppPolicyUpdate(BaseModel):
+    app_policy: AppPolicyUpdate
+
+
+class PCCommandRequest(BaseModel):
+    reason: Optional[str] = None
 
 
 class BanRequest(BaseModel):
@@ -81,6 +101,8 @@ class PCConfigUpdate(BaseModel):
     run_as_service: Optional[bool] = None
     alarm_enabled: Optional[bool] = None
     alarm_color: Optional[str] = None
+    client_mode: Optional[str] = None
+    app_policy: Optional[AppPolicyUpdate] = None
 
 
 class PCFullStatus(BaseModel):
@@ -285,28 +307,62 @@ async def get_pc_status(pc_id: int, db: Prisma = Depends(get_db)):
     )
 
 
+async def _queue_pc_command(
+    db: Prisma,
+    pc_id: int,
+    command_type: str,
+    payload: Optional[dict] = None,
+) -> None:
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if not pc:
+        raise HTTPException(status_code=404, detail="PC not found")
+
+    config = parse_pc_config(pc.config)
+    queue_command(
+        config,
+        {
+            "type": command_type,
+            "payload": payload or {},
+            "id": secrets.token_hex(8),
+        },
+    )
+    await db.pc.update(
+        where={"id": pc_id},
+        data={"config": dump_pc_config(config)},
+    )
+
+
 @router.post("/{pc_id}/heartbeat", response_model=HeartbeatResponse)
 async def heartbeat(pc_id: int, data: HeartbeatRequest, db: Prisma = Depends(get_db)):
     """Client heartbeat endpoint."""
     pc = await db.pc.find_unique(where={"id": pc_id})
     if not pc:
         raise HTTPException(status_code=404, detail="PC not found")
-    
-    # Update PC status
+
+    config = parse_pc_config(pc.config)
+    commands = pop_pending_commands(config)
+
+    client_config = await build_client_config(db, pc)
+
     await db.pc.update(
         where={"id": pc_id},
         data={
             "lastHeartbeatAt": datetime.now(timezone.utc),
             "clientRunning": True,
             "status": "online" if data.status == "online" else data.status,
-        }
+            "config": dump_pc_config(config),
+        },
     )
-    
+
     return HeartbeatResponse(
         success=True,
         server_time=datetime.now(timezone.utc),
         is_banned=pc.isBanned,
         alarm_active=pc.isAlarming,
+        commands=commands,
+        app_policy=client_config.get("app_policy"),
+        client_mode=client_config.get("client_mode"),
+        config_updates=client_config,
     )
 
 
@@ -474,7 +530,10 @@ async def get_pc_config(pc_id: int, db: Prisma = Depends(get_db)):
     pc = await db.pc.find_unique(where={"id": pc_id})
     if not pc:
         raise HTTPException(status_code=404, detail="PC not found")
-    
+
+    client_config = await build_client_config(db, pc)
+    pc_config = parse_pc_config(pc.config)
+
     return {
         "auto_start_enabled": pc.autoStartEnabled,
         "run_as_service": pc.runAsService,
@@ -482,7 +541,19 @@ async def get_pc_config(pc_id: int, db: Prisma = Depends(get_db)):
         "alarm_color": pc.alarmColor,
         "recovery_key_combo": pc.recoveryKeyCombo,
         "is_banned": pc.isBanned,
+        "client_mode": client_config.get("client_mode"),
+        "app_policy": client_config.get("app_policy"),
+        "pc_app_policy": pc_config.get("app_policy"),
     }
+
+
+@router.get("/{pc_id}/client-config")
+async def get_pc_client_config(pc_id: int, db: Prisma = Depends(get_db)):
+    """Full merged client config for a PC."""
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if not pc:
+        raise HTTPException(status_code=404, detail="PC not found")
+    return await build_client_config(db, pc)
 
 
 @router.put("/{pc_id}/config")
@@ -491,7 +562,7 @@ async def update_pc_config(pc_id: int, data: PCConfigUpdate, db: Prisma = Depend
     pc = await db.pc.find_unique(where={"id": pc_id})
     if not pc:
         raise HTTPException(status_code=404, detail="PC not found")
-    
+
     update_data = {}
     if data.auto_start_enabled is not None:
         update_data["autoStartEnabled"] = data.auto_start_enabled
@@ -501,13 +572,96 @@ async def update_pc_config(pc_id: int, data: PCConfigUpdate, db: Prisma = Depend
         update_data["alarmEnabled"] = data.alarm_enabled
     if data.alarm_color is not None:
         update_data["alarmColor"] = data.alarm_color
-    
+
+    config = parse_pc_config(pc.config)
+    if data.client_mode is not None:
+        config["client_mode"] = data.client_mode
+    if data.app_policy is not None:
+        existing = config.get("app_policy", {})
+        if not isinstance(existing, dict):
+            existing = {}
+        policy_update = data.app_policy.model_dump(exclude_none=True)
+        existing.update(policy_update)
+        config["app_policy"] = existing
+        update_data["config"] = dump_pc_config(config)
+
     await db.pc.update(
         where={"id": pc_id},
-        data=update_data
+        data=update_data,
     )
-    
+
     return {"message": "Config updated"}
+
+
+@router.put("/{pc_id}/app-policy")
+async def update_pc_app_policy(
+    pc_id: int,
+    data: PCAppPolicyUpdate,
+    db: Prisma = Depends(get_db),
+):
+    """Update per-PC app policy overrides."""
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if not pc:
+        raise HTTPException(status_code=404, detail="PC not found")
+
+    config = parse_pc_config(pc.config)
+    existing = config.get("app_policy", {})
+    if not isinstance(existing, dict):
+        existing = {}
+    existing.update(data.app_policy.model_dump(exclude_none=True))
+    config["app_policy"] = existing
+
+    await db.pc.update(
+        where={"id": pc_id},
+        data={"config": dump_pc_config(config)},
+    )
+    return {"message": "PC app policy updated", "app_policy": existing}
+
+
+@router.post("/{pc_id}/commands/force-lock")
+async def force_lock_pc(
+    pc_id: int,
+    data: PCCommandRequest = PCCommandRequest(),
+    db: Prisma = Depends(get_db),
+):
+    await _queue_pc_command(db, pc_id, "force_lock", {"reason": data.reason})
+    return {"message": "Force lock queued"}
+
+
+@router.post("/{pc_id}/commands/force-logout")
+async def force_logout_pc(
+    pc_id: int,
+    data: PCCommandRequest = PCCommandRequest(),
+    db: Prisma = Depends(get_db),
+):
+    from .sessions import _detach_session_from_pc, _active_remaining_minutes
+
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if not pc:
+        raise HTTPException(status_code=404, detail="PC not found")
+
+    if pc.currentSessionId:
+        session = await db.session.find_unique(where={"id": pc.currentSessionId})
+        if session and session.isActive and session.status == "active":
+            remaining = _active_remaining_minutes(session)
+            await db.session.update(
+                where={"id": session.id},
+                data={
+                    "status": "paused",
+                    "pausedAt": datetime.now(timezone.utc),
+                    "remainingMinutes": remaining,
+                },
+            )
+            await _detach_session_from_pc(db, session)
+
+    await _queue_pc_command(db, pc_id, "force_logout", {"reason": data.reason})
+    return {"message": "Force logout queued"}
+
+
+@router.post("/{pc_id}/commands/refresh-rules")
+async def refresh_rules_pc(pc_id: int, db: Prisma = Depends(get_db)):
+    await _queue_pc_command(db, pc_id, "refresh_rules")
+    return {"message": "Refresh rules queued"}
 
 
 @router.delete("/{pc_id}")

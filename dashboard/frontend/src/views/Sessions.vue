@@ -58,6 +58,13 @@
               <div class="flex space-x-2">
                 <button
                   v-if="session.status === 'active'"
+                  @click="extendSession(session)"
+                  class="text-sm px-3 py-1 rounded bg-blue-100 text-blue-600"
+                >
+                  Extend
+                </button>
+                <button
+                  v-if="session.status === 'active'"
                   @click="pauseSession(session)"
                   class="text-sm px-3 py-1 rounded bg-warning-100 text-warning-600"
                 >
@@ -228,6 +235,20 @@ const stopSession = async (session) => {
     fetchSessions()
   } catch (error) {
     console.error('Failed to stop session:', error)
+  }
+}
+
+const extendSession = async (session) => {
+  const minutes = prompt('Add how many minutes?', '30')
+  if (!minutes) return
+
+  try {
+    await api.post(`/api/sessions/${session.id}/extend`, {
+      additional_minutes: Number(minutes),
+    })
+    fetchSessions()
+  } catch (error) {
+    console.error('Failed to extend session:', error)
   }
 }
 

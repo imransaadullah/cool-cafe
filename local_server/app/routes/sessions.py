@@ -91,6 +91,10 @@ class SessionHeartbeatResponse(BaseModel):
     session_id: Optional[int] = None
 
 
+class ExtendSessionRequest(BaseModel):
+    additional_minutes: float
+
+
 class CodeRedeemRequest(BaseModel):
     code: str
     pc_id: int
@@ -608,3 +612,41 @@ async def redeem_code(request: CodeRedeemRequest, db: Prisma = Depends(get_db)):
         end_time=result.end_time,
         action=result.action,
     )
+
+
+@router.post("/{session_id}/extend")
+async def extend_session(
+    session_id: int,
+    request: ExtendSessionRequest,
+    db: Prisma = Depends(get_db),
+):
+    """Admin: add time to an active session."""
+    if request.additional_minutes <= 0:
+        raise HTTPException(status_code=400, detail="additional_minutes must be positive")
+
+    session = await db.session.find_unique(where={"id": session_id})
+    if not session or not session.isActive:
+        raise HTTPException(status_code=404, detail="Active session not found")
+
+    new_duration = session.durationMinutes + request.additional_minutes
+    await db.session.update(
+        where={"id": session_id},
+        data={"durationMinutes": new_duration},
+    )
+
+    if session.currentPcId:
+        from .pcs import _queue_pc_command
+
+        await _queue_pc_command(
+            db,
+            session.currentPcId,
+            "extend",
+            {"additional_minutes": request.additional_minutes},
+        )
+
+    return {
+        "message": "Session extended",
+        "session_id": session_id,
+        "duration_minutes": new_duration,
+        "additional_minutes": request.additional_minutes,
+    }

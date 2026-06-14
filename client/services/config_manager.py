@@ -19,6 +19,7 @@ class ClientConfig:
     
     DEFAULT_CONFIG = {
         "configured": False,
+        "mode": "dev",
         "server_url": "http://localhost:8000",
         "pc_id": 1,
         "pc_number": 1,
@@ -29,6 +30,12 @@ class ClientConfig:
             "dns_blocking": True,
             "process_blocking": True,
             "url_filtering": True,
+        },
+        "security": {
+            "static_master_code": "",
+            "recovery_combo": "F9+F10+F11",
+            "alarm_color": "#FF0000",
+            "run_as_service": False,
         },
         "ui": {
             "fullscreen": True,
@@ -159,6 +166,14 @@ class ClientConfig:
     def is_filtering_enabled(self, filter_type: str) -> bool:
         """Check if a specific filter type is enabled."""
         return self.get(f"filtering.{filter_type}", False)
+
+    def is_production_mode(self) -> bool:
+        """True when client runs in production (kiosk-hardened) mode."""
+        return self.get("mode", "dev") == "production"
+
+    def set_mode(self, mode: str):
+        if mode in ("production", "dev"):
+            self.set("mode", mode)
     
     def update_server_url(self, url: str):
         """Update the server URL."""

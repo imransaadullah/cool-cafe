@@ -18,6 +18,8 @@ from services.session import SessionManager
 from services.heartbeat import HeartbeatThread
 from services.offline import OfflineManager
 from services.config_manager import client_config
+from services.security_controller import SecurityController
+from services.master_code import MasterCodeValidator
 from ui.session_overlay import SessionOverlay
 
 
@@ -28,11 +30,23 @@ class LockScreen(QMainWindow):
         self.offline_manager = OfflineManager()
         self.heartbeat_thread = None
         self.session_overlay = None
+        self.security = SecurityController(self)
+        self.master_code_validator = MasterCodeValidator()
         self.current_pc_id = client_config.get_pc_id()
         self._offline_grace_ticks = 0
+        self._production_mode = client_config.is_production_mode()
 
         self.setup_ui()
         self.setup_timer()
+        self._wire_security()
+        self.start_pc_heartbeat()
+
+    def _wire_security(self):
+        self.security.start()
+        self.security.force_lock.connect(self.on_session_expired)
+        self.security.force_logout.connect(self._admin_force_logout)
+        self.security.refresh_rules.connect(self.security.refresh_filter_rules)
+        self.security.extend_session.connect(self._admin_extend_session)
 
     def setup_ui(self):
         self.setWindowTitle("CyberCafe")
@@ -64,6 +78,18 @@ class LockScreen(QMainWindow):
         self.create_status_screen()
 
         self.stack.setCurrentIndex(0)
+        self._apply_production_ui()
+
+    def _apply_production_ui(self):
+        self._production_mode = client_config.is_production_mode()
+        if self._production_mode:
+            self.exit_btn.hide()
+            if hasattr(self, "hint_label"):
+                self.hint_label.setText("Staff access available below")
+        else:
+            self.exit_btn.show()
+            if hasattr(self, "hint_label"):
+                self.hint_label.setText("Press Esc to exit  |  Settings to reconfigure")
 
     def create_code_entry_screen(self):
         screen = QWidget()
@@ -93,15 +119,21 @@ class LockScreen(QMainWindow):
         self.code_status_label.setStyleSheet("color: #ff6b6b; background: transparent;")
         layout.addWidget(self.code_status_label)
 
-        hint_label = QLabel("Press Esc to exit  |  Settings to reconfigure")
-        hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint_label.setStyleSheet("color: #95afc0; font-size: 12px; background: transparent;")
-        layout.addWidget(hint_label)
+        self.hint_label = QLabel("Press Esc to exit  |  Settings to reconfigure")
+        self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hint_label.setStyleSheet("color: #95afc0; font-size: 12px; background: transparent;")
+        layout.addWidget(self.hint_label)
 
         bottom_layout = QHBoxLayout()
 
+        self.staff_btn = QPushButton("Staff")
+        self.staff_btn.clicked.connect(self.open_staff_login)
+        bottom_layout.addWidget(self.staff_btn)
+
         settings_btn = QPushButton("Settings")
         settings_btn.clicked.connect(self.open_settings)
+        if self._production_mode:
+            settings_btn.hide()
         bottom_layout.addWidget(settings_btn)
 
         self.exit_btn = QPushButton("Exit")
@@ -183,7 +215,7 @@ class LockScreen(QMainWindow):
         if success and session_data:
             self.session_manager.apply_session(session_data, code)
             self._offline_grace_ticks = 0
-            self.start_heartbeat()
+            self._on_session_started()
             self.code_status_label.setText("")
             self.code_input.clear()
             self.enter_session_mode()
@@ -192,6 +224,12 @@ class LockScreen(QMainWindow):
             self.offline_manager.queue_action(
                 "code_attempt", {"code": code, "pc_id": self.current_pc_id}
             )
+
+    def _on_session_started(self):
+        if self.heartbeat_thread:
+            self.heartbeat_thread.set_session_active(True)
+            self.heartbeat_thread.set_access_code(self.session_manager.access_code)
+        self.security.on_session_started()
 
     def _ensure_session_overlay(self):
         if self.session_overlay is None:
@@ -217,19 +255,22 @@ class LockScreen(QMainWindow):
         self.raise_()
         self.activateWindow()
         self.code_input.setFocus()
+        self._apply_production_ui()
 
-    def start_heartbeat(self):
+    def start_pc_heartbeat(self):
         if self.heartbeat_thread and self.heartbeat_thread.isRunning():
-            self.heartbeat_thread.stop()
+            return
 
-        self.heartbeat_thread = HeartbeatThread(
-            self.current_pc_id,
-            access_code=self.session_manager.access_code,
-        )
+        self.heartbeat_thread = HeartbeatThread(self.current_pc_id)
         self.heartbeat_thread.set_session_active(self.session_manager.is_active)
+        if self.session_manager.access_code:
+            self.heartbeat_thread.set_access_code(self.session_manager.access_code)
+
         self.heartbeat_thread.lock_signal.connect(self.on_session_expired)
         self.heartbeat_thread.session_update.connect(self.on_session_heartbeat)
         self.heartbeat_thread.ban_signal.connect(self.on_banned)
+        self.heartbeat_thread.config_update.connect(self._on_config_update)
+        self.heartbeat_thread.command_signal.connect(self.security.handle_commands)
         self.heartbeat_thread.start()
 
     def on_session_heartbeat(self, data: dict):
@@ -247,6 +288,10 @@ class LockScreen(QMainWindow):
         if self.session_overlay and self.session_overlay.isVisible():
             self.session_overlay.set_time_text(time_text)
 
+    def _on_config_update(self, config: dict):
+        self.security.apply_server_config(config)
+        self._apply_production_ui()
+
     def on_banned(self):
         QMessageBox.warning(
             self,
@@ -257,13 +302,19 @@ class LockScreen(QMainWindow):
 
     def on_session_expired(self):
         self.session_manager.clear_session()
-        self._stop_heartbeat()
+        if self.heartbeat_thread:
+            self.heartbeat_thread.set_session_active(False)
+        self.security.on_session_ended()
         self.show_lock_ui()
 
-    def _stop_heartbeat(self):
-        if self.heartbeat_thread and self.heartbeat_thread.isRunning():
-            self.heartbeat_thread.stop()
-            self.heartbeat_thread = None
+    def _admin_force_logout(self):
+        if self.session_manager.is_active:
+            self.session_manager.logout(self.current_pc_id)
+        self.on_session_expired()
+
+    def _admin_extend_session(self, additional_minutes: float):
+        if self.session_manager.is_active:
+            self.session_manager.extend_local(additional_minutes * 60)
 
     def on_logout(self):
         parent = (
@@ -284,10 +335,52 @@ class LockScreen(QMainWindow):
             if not paused:
                 QMessageBox.warning(parent, "Logout", message)
                 return
-            self._stop_heartbeat()
-            self.show_lock_ui()
+            self.on_session_expired()
+
+    def open_staff_login(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Staff Access")
+        dialog.setMinimumWidth(360)
+
+        layout = QFormLayout(dialog)
+        code_input = QLineEdit()
+        code_input.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addRow("Master code:", code_input)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+
+        if not dialog.exec():
+            return
+
+        success, message, duration = self.master_code_validator.validate(
+            code_input.text().strip()
+        )
+        if not success:
+            QMessageBox.warning(self, "Staff Access", message)
+            return
+
+        client_config.set_mode("dev")
+        self._apply_production_ui()
+        QMessageBox.information(
+            self,
+            "Staff Access",
+            message or "Staff access granted. Dev controls enabled.",
+        )
 
     def open_settings(self):
+        if client_config.is_production_mode():
+            QMessageBox.information(
+                self,
+                "Settings",
+                "Settings are disabled in production mode. Use Staff access.",
+            )
+            return
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Settings")
         dialog.setMinimumWidth(400)
@@ -344,10 +437,18 @@ class LockScreen(QMainWindow):
             self.current_pc_id = pc_id
             self.pc_label.setText(f"PC #{pc_number}")
 
+            if self.heartbeat_thread:
+                self.heartbeat_thread.stop()
+            self.start_pc_heartbeat()
+
             QMessageBox.information(self, "Settings", "Settings saved!")
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape and not self.session_manager.is_active:
+        if (
+            event.key() == Qt.Key.Key_Escape
+            and not self.session_manager.is_active
+            and not client_config.is_production_mode()
+        ):
             self.close()
             return
         if event.key() in [
@@ -360,7 +461,11 @@ class LockScreen(QMainWindow):
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
+        if client_config.is_production_mode():
+            event.ignore()
+            return
         if not self.session_manager.is_active:
+            self.security.stop()
             event.accept()
         else:
             event.ignore()

@@ -185,6 +185,33 @@
               placeholder="+234 800 000 0000"
             />
           </div>
+
+          <div class="mb-4 border-t pt-4">
+            <h3 class="font-medium mb-3">Branch-wide App Policy</h3>
+            <div class="mb-3">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Client mode</label>
+              <select v-model="branchAppPolicy.client_mode" class="input">
+                <option value="production">Production</option>
+                <option value="dev">Development</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Policy mode</label>
+              <select v-model="branchAppPolicy.mode" class="input">
+                <option value="blocklist">Blocklist</option>
+                <option value="allowlist">Allowlist</option>
+                <option value="hybrid">Hybrid</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Allowed apps (one per line)</label>
+              <textarea v-model="branchAllowedApps" class="input" rows="3" />
+            </div>
+            <div class="mb-3">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Blocked apps (one per line)</label>
+              <textarea v-model="branchBlockedApps" class="input" rows="3" />
+            </div>
+          </div>
           
           <button type="submit" class="btn btn-primary">
             Save Branch Settings
@@ -216,6 +243,16 @@ const branchSettings = ref({
   address: '',
   phone: '',
 })
+
+const branchAppPolicy = ref({
+  client_mode: 'production',
+  mode: 'blocklist',
+  allowed_apps: [],
+  blocked_apps: [],
+})
+const branchAllowedApps = ref('')
+const branchBlockedApps = ref('')
+const branchId = ref(1)
 
 const filterRules = ref([])
 const newRule = ref({
@@ -268,9 +305,39 @@ const savePaymentSettings = () => {
   alert('Payment settings saved!')
 }
 
-const saveBranchSettings = () => {
-  localStorage.setItem('branchSettings', JSON.stringify(branchSettings.value))
-  alert('Branch settings saved!')
+const saveBranchSettings = async () => {
+  try {
+    await api.put(`/api/branches/${branchId.value}`, branchSettings.value)
+    await api.put(`/api/branches/${branchId.value}/app-policy`, {
+      client_mode: branchAppPolicy.value.client_mode,
+      app_policy: {
+        mode: branchAppPolicy.value.mode,
+        allowed_apps: branchAllowedApps.value.split('\n').map((s) => s.trim()).filter(Boolean),
+        blocked_apps: branchBlockedApps.value.split('\n').map((s) => s.trim()).filter(Boolean),
+      },
+    })
+    alert('Branch settings saved!')
+  } catch (error) {
+    console.error('Failed to save branch settings:', error)
+    alert('Failed to save branch settings')
+  }
+}
+
+const fetchBranchPolicy = async () => {
+  try {
+    const response = await api.get(`/api/branches/${branchId.value}/app-policy`)
+    const policy = response.data.app_policy || {}
+    branchAppPolicy.value = {
+      client_mode: response.data.client_mode || 'production',
+      mode: policy.mode || 'blocklist',
+      allowed_apps: policy.allowed_apps || [],
+      blocked_apps: policy.blocked_apps || [],
+    }
+    branchAllowedApps.value = branchAppPolicy.value.allowed_apps.join('\n')
+    branchBlockedApps.value = branchAppPolicy.value.blocked_apps.join('\n')
+  } catch (error) {
+    console.error('Failed to fetch branch policy:', error)
+  }
 }
 
 onMounted(() => {
@@ -285,5 +352,6 @@ onMounted(() => {
   if (savedBranch) branchSettings.value = JSON.parse(savedBranch)
   
   fetchFilterRules()
+  fetchBranchPolicy()
 })
 </script>

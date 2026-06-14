@@ -8,18 +8,21 @@ import json
 import os
 import platform
 import subprocess
-from typing import List, Dict, Any
 import logging
+from typing import List, Dict, Any
+
+from services.config_manager import client_config
 
 logger = logging.getLogger(__name__)
 
 
 class ContentFilterClient:
     """Client-side content filtering service."""
-    
-    def __init__(self, server_url: str, pc_id: int):
+
+    def __init__(self, server_url: str, pc_id: int, branch_id: int | None = None):
         self.server_url = server_url
         self.pc_id = pc_id
+        self.branch_id = branch_id
         self.platform = platform.system().lower()
         self.hosts_file = self._get_hosts_file_path()
         self.filter_config_file = "filter_config.json"
@@ -34,16 +37,19 @@ class ContentFilterClient:
     def fetch_rules(self) -> Dict[str, Any]:
         """Fetch filter rules from server."""
         try:
+            params = {}
+            if self.branch_id is not None:
+                params["branch_id"] = self.branch_id
             response = requests.get(
                 f"{self.server_url}/api/content-filter/rules",
+                params=params,
                 timeout=10,
             )
             if response.status_code == 200:
                 return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch filter rules: {e}")
-        
-        # Return cached rules if available
+
         return self._load_cached_rules()
     
     def _load_cached_rules(self) -> Dict[str, Any]:
@@ -66,8 +72,10 @@ class ContentFilterClient:
     
     def apply_rules(self, rules: Dict[str, Any]):
         """Apply filter rules locally."""
-        self._apply_dns_rules(rules.get("dns", []))
-        self._apply_process_rules(rules.get("process", []))
+        if client_config.is_filtering_enabled("dns_blocking"):
+            self._apply_dns_rules(rules.get("dns", []))
+        if client_config.is_filtering_enabled("process_blocking"):
+            self._apply_process_rules(rules.get("process", []))
         self._save_cached_rules(rules)
     
     def _apply_dns_rules(self, rules: List[Dict[str, Any]]):

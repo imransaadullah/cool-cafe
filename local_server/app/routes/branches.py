@@ -23,6 +23,8 @@ class BranchUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     is_active: Optional[bool] = None
+    client_mode: Optional[str] = None
+    app_policy: Optional[dict] = None
 
 
 class BranchResponse(ORMModel):
@@ -105,12 +107,61 @@ async def update_branch(
         update_data["email"] = branch_data.email
     if branch_data.is_active is not None:
         update_data["isActive"] = branch_data.is_active
+
+    if branch_data.client_mode is not None or branch_data.app_policy is not None:
+        config = branch.config if isinstance(branch.config, dict) else {}
+        if branch_data.client_mode is not None:
+            config["client_mode"] = branch_data.client_mode
+        if branch_data.app_policy is not None:
+            existing = config.get("app_policy", {})
+            if not isinstance(existing, dict):
+                existing = {}
+            existing.update(branch_data.app_policy)
+            config["app_policy"] = existing
+        update_data["config"] = config
     
     updated_branch = await db.branch.update(
         where={"id": branch_id},
         data=update_data,
     )
     return updated_branch
+
+
+@router.get("/{branch_id}/app-policy")
+async def get_branch_app_policy(branch_id: int, db: Prisma = Depends(get_db)):
+    branch = await db.branch.find_unique(where={"id": branch_id})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    config = branch.config if isinstance(branch.config, dict) else {}
+    return {
+        "client_mode": config.get("client_mode", "production"),
+        "app_policy": config.get("app_policy", {}),
+    }
+
+
+@router.put("/{branch_id}/app-policy")
+async def update_branch_app_policy(
+    branch_id: int,
+    data: BranchUpdate,
+    db: Prisma = Depends(get_db),
+):
+    branch = await db.branch.find_unique(where={"id": branch_id})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    config = branch.config if isinstance(branch.config, dict) else {}
+    if data.client_mode is not None:
+        config["client_mode"] = data.client_mode
+    if data.app_policy is not None:
+        existing = config.get("app_policy", {})
+        if not isinstance(existing, dict):
+            existing = {}
+        existing.update(data.app_policy)
+        config["app_policy"] = existing
+
+    await db.branch.update(where={"id": branch_id}, data={"config": config})
+    return {"message": "Branch app policy updated", "config": config}
 
 
 @router.post("/{branch_id}/admins", response_model=AdminResponse)

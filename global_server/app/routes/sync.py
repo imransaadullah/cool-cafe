@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from prisma import Prisma
 from shared.database import get_db
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from datetime import datetime
+
+from ..services.sync_processor import apply_sync_item, process_pending_queue
 
 router = APIRouter()
 
@@ -20,6 +22,41 @@ class SyncResponse(BaseModel):
     success: bool
     message: str
     records_synced: int
+
+
+class SyncApplyRequest(BaseModel):
+    action_type: str
+    table_name: str
+    record_id: str
+    payload: Dict[str, Any]
+
+
+@router.post("/apply")
+async def apply_sync_record(
+    body: SyncApplyRequest,
+    db: Prisma = Depends(get_db),
+):
+    """Apply a single sync record pushed from a local branch server."""
+    ok = await apply_sync_item(
+        db,
+        body.action_type,
+        body.table_name,
+        body.record_id,
+        body.payload,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail="Could not apply sync record")
+    return {"success": True}
+
+
+@router.post("/process-queue")
+async def process_queue(
+    background_tasks: BackgroundTasks,
+    db: Prisma = Depends(get_db),
+):
+    """Process pending offline queue items (owner dashboard / cron)."""
+    count = await process_pending_queue(db)
+    return {"success": True, "processed": count}
 
 
 @router.post("/pull")
@@ -42,7 +79,6 @@ async def pull_sync_data(branch_id: int, db: Prisma = Depends(get_db)):
 @router.post("/push", response_model=SyncResponse)
 async def push_sync_data(sync_data: SyncData, db: Prisma = Depends(get_db)):
     """Push data from local server to global server."""
-    # Store in offline queue for processing
     queue_item = await db.offlinequeue.create(
         data={
             "actionType": sync_data.action_type,
@@ -52,11 +88,24 @@ async def push_sync_data(sync_data: SyncData, db: Prisma = Depends(get_db)):
             "synced": False,
         }
     )
+
+    applied = await apply_sync_item(
+        db,
+        sync_data.action_type,
+        sync_data.table_name,
+        sync_data.record_id,
+        sync_data.payload,
+    )
+    if applied:
+        await db.offlinequeue.update(
+            where={"id": queue_item.id},
+            data={"synced": True, "syncedAt": datetime.utcnow()},
+        )
     
     return SyncResponse(
         success=True,
-        message="Data queued for sync",
-        records_synced=1,
+        message="Data synced" if applied else "Data queued for sync",
+        records_synced=1 if applied else 0,
     )
 
 

@@ -6,6 +6,47 @@
         + Generate Codes
       </button>
     </div>
+
+    <!-- Counter checkout: sell time → code → print -->
+    <div class="card mb-8">
+      <h2 class="text-lg font-semibold mb-4">Sell Time at Counter</h2>
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">Duration (mins)</label>
+          <select v-model.number="sellForm.duration_minutes" class="input w-full">
+            <option :value="30">30</option>
+            <option :value="60">60</option>
+            <option :value="90">90</option>
+            <option :value="120">120</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">Amount (₦)</label>
+          <input v-model.number="sellForm.amount" type="number" min="0" class="input w-full" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">Payment</label>
+          <select v-model="sellForm.method" class="input w-full">
+            <option value="cash">Cash</option>
+            <option value="transfer">Transfer</option>
+            <option value="card">Card</option>
+          </select>
+        </div>
+        <div>
+          <button @click="sellTime" class="btn btn-primary w-full" :disabled="selling">
+            {{ selling ? 'Processing…' : 'Sell & Issue Code' }}
+          </button>
+        </div>
+        <div v-if="lastSoldCode" class="md:col-span-5 bg-green-50 border border-green-200 rounded p-4 flex justify-between items-center">
+          <div>
+            <p class="text-sm text-green-700">Code issued — {{ lastSoldCode.duration_minutes }} mins · ₦{{ lastSoldCode.amount }}</p>
+            <p class="text-2xl font-mono font-bold text-green-900">{{ lastSoldCode.code }}</p>
+            <p class="text-xs text-green-600">Ref: {{ lastSoldCode.payment_reference }}</p>
+          </div>
+          <button @click="printSoldCode" class="btn btn-secondary">Print Ticket</button>
+        </div>
+      </div>
+    </div>
     
     <!-- Code Batches -->
     <div class="card mb-8">
@@ -199,6 +240,15 @@ const batches = ref([])
 const batchCodes = ref([])
 const selectedBatch = ref(null)
 const showGenerateModal = ref(false)
+const selling = ref(false)
+const lastSoldCode = ref(null)
+
+const sellForm = ref({
+  branch_id: 1,
+  duration_minutes: 60,
+  amount: 500,
+  method: 'cash',
+})
 
 const formData = ref({
   duration_minutes: 60,
@@ -215,6 +265,43 @@ const fetchBatches = async () => {
   } catch (error) {
     console.error('Failed to fetch batches:', error)
   }
+}
+
+const sellTime = async () => {
+  if (!sellForm.value.amount || sellForm.value.amount <= 0) {
+    alert('Enter a valid amount')
+    return
+  }
+  selling.value = true
+  try {
+    const response = await api.post('/api/codes/sell', sellForm.value)
+    lastSoldCode.value = response.data
+    fetchBatches()
+  } catch (error) {
+    console.error('Failed to sell time:', error)
+    alert(error.response?.data?.detail || 'Sale failed')
+  } finally {
+    selling.value = false
+  }
+}
+
+const printSoldCode = () => {
+  if (!lastSoldCode.value) return
+  const c = lastSoldCode.value
+  const html = `
+    <html><head><title>Time Code</title>
+    <style>body{font-family:sans-serif;text-align:center;padding:40px}
+    .code{font-size:28px;font-weight:bold;letter-spacing:2px;margin:16px 0}
+    </style></head><body>
+    <h2>Cyber Café Time Ticket</h2>
+    <div class="code">${c.code}</div>
+    <p>${c.duration_minutes} minutes · ₦${c.amount}</p>
+    <p style="font-size:12px;color:#666">Enter this code at any PC</p>
+    </body></html>`
+  const w = window.open('', '_blank')
+  w.document.write(html)
+  w.document.close()
+  w.print()
 }
 
 const formatDate = (dateStr) => {

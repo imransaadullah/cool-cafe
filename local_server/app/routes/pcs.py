@@ -329,24 +329,29 @@ async def _queue_pc_command(
     pc_id: int,
     command_type: str,
     payload: Optional[dict] = None,
-) -> None:
+) -> Dict[str, Any]:
     pc = await db.pc.find_unique(where={"id": pc_id})
     if not pc:
         raise HTTPException(status_code=404, detail="PC not found")
 
-    config = parse_pc_config(pc.config)
-    queue_command(
-        config,
-        {
-            "type": command_type,
-            "payload": payload or {},
-            "id": secrets.token_hex(8),
-        },
-    )
-    await db.pc.update(
-        where={"id": pc_id},
-        data={"config": dump_pc_config(config)},
-    )
+    command = {
+        "type": command_type,
+        "payload": payload or {},
+        "id": secrets.token_hex(8),
+    }
+
+    from ..websocket import manager
+
+    delivered = await manager.send_client_commands(pc_id, [command])
+    if not delivered:
+        config = parse_pc_config(pc.config)
+        queue_command(config, command)
+        await db.pc.update(
+            where={"id": pc_id},
+            data={"config": dump_pc_config(config)},
+        )
+
+    return command
 
 
 @router.post("/{pc_id}/heartbeat", response_model=HeartbeatResponse)
@@ -641,6 +646,12 @@ async def force_lock_pc(
     data: PCCommandRequest = PCCommandRequest(),
     db: Prisma = Depends(get_db),
 ):
+    from .sessions import _find_active_session_on_pc, _pause_active_session
+
+    session = await _find_active_session_on_pc(db, pc_id)
+    if session:
+        await _pause_active_session(db, session, enforce_min_remaining=False)
+
     await _queue_pc_command(db, pc_id, "force_lock", {"reason": data.reason})
     return {"message": "Force lock queued"}
 
@@ -651,25 +662,15 @@ async def force_logout_pc(
     data: PCCommandRequest = PCCommandRequest(),
     db: Prisma = Depends(get_db),
 ):
-    from .sessions import _detach_session_from_pc, _active_remaining_minutes
+    from .sessions import _find_active_session_on_pc, _pause_active_session
 
     pc = await db.pc.find_unique(where={"id": pc_id})
     if not pc:
         raise HTTPException(status_code=404, detail="PC not found")
 
-    if pc.currentSessionId:
-        session = await db.session.find_unique(where={"id": pc.currentSessionId})
-        if session and session.isActive and session.status == "active":
-            remaining = _active_remaining_minutes(session)
-            await db.session.update(
-                where={"id": session.id},
-                data={
-                    "status": "paused",
-                    "pausedAt": datetime.now(timezone.utc),
-                    "remainingMinutes": remaining,
-                },
-            )
-            await _detach_session_from_pc(db, session)
+    session = await _find_active_session_on_pc(db, pc_id)
+    if session:
+        await _pause_active_session(db, session, enforce_min_remaining=False)
 
     await _queue_pc_command(db, pc_id, "force_logout", {"reason": data.reason})
     return {"message": "Force logout queued"}

@@ -12,14 +12,16 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QFont
 from services.session import SessionManager
 from services.heartbeat import HeartbeatThread
+from services.realtime import RealtimeThread
 from services.offline import OfflineManager
 from services.config_manager import client_config
 from services.security_controller import SecurityController
 from services.master_code import MasterCodeValidator
+from services.kiosk_guard import should_block_quit_shortcut, should_block_window_close
 from ui.session_overlay import SessionOverlay
 
 
@@ -29,6 +31,7 @@ class LockScreen(QMainWindow):
         self.session_manager = SessionManager()
         self.offline_manager = OfflineManager()
         self.heartbeat_thread = None
+        self.realtime_thread = None
         self.session_overlay = None
         self.security = SecurityController(self)
         self.master_code_validator = MasterCodeValidator()
@@ -38,8 +41,27 @@ class LockScreen(QMainWindow):
 
         self.setup_ui()
         self.setup_timer()
+        self._setup_kiosk_watchdog()
         self._wire_security()
         self.start_pc_heartbeat()
+        self.start_realtime()
+
+        self._offline_lock_timer = QTimer(self)
+        self._offline_lock_timer.setSingleShot(True)
+        self._offline_lock_timer.timeout.connect(self._on_offline_lock_timeout)
+
+    def _setup_kiosk_watchdog(self):
+        self._kiosk_timer = QTimer(self)
+        self._kiosk_timer.timeout.connect(self._enforce_kiosk_state)
+        self._kiosk_timer.start(2000)
+
+    def _enforce_kiosk_state(self):
+        if not client_config.is_production_mode():
+            return
+        if self.session_manager.is_active:
+            return
+        if self.isMinimized() or not self.isVisible() or not self.isFullScreen():
+            self.show_lock_ui()
 
     def _wire_security(self):
         self.security.start()
@@ -82,14 +104,20 @@ class LockScreen(QMainWindow):
 
     def _apply_production_ui(self):
         self._production_mode = client_config.is_production_mode()
-        if self._production_mode:
+        exit_allowed = client_config.is_exit_allowed()
+
+        if exit_allowed:
+            self.exit_btn.show()
+            self.settings_btn.show()
+            self.hint_label.setText("Press Esc to exit  |  Settings to reconfigure")
+        elif self._production_mode:
             self.exit_btn.hide()
-            if hasattr(self, "hint_label"):
-                self.hint_label.setText("Staff access available below")
+            self.settings_btn.hide()
+            self.hint_label.setText("Enter your access code to start")
         else:
             self.exit_btn.show()
-            if hasattr(self, "hint_label"):
-                self.hint_label.setText("Press Esc to exit  |  Settings to reconfigure")
+            self.settings_btn.show()
+            self.hint_label.setText("Press Esc to exit  |  Settings to reconfigure")
 
     def create_code_entry_screen(self):
         screen = QWidget()
@@ -130,11 +158,9 @@ class LockScreen(QMainWindow):
         self.staff_btn.clicked.connect(self.open_staff_login)
         bottom_layout.addWidget(self.staff_btn)
 
-        settings_btn = QPushButton("Settings")
-        settings_btn.clicked.connect(self.open_settings)
-        if self._production_mode:
-            settings_btn.hide()
-        bottom_layout.addWidget(settings_btn)
+        self.settings_btn = QPushButton("Settings")
+        self.settings_btn.clicked.connect(self.open_settings)
+        bottom_layout.addWidget(self.settings_btn)
 
         self.exit_btn = QPushButton("Exit")
         self.exit_btn.clicked.connect(self.close)
@@ -229,6 +255,8 @@ class LockScreen(QMainWindow):
         if self.heartbeat_thread:
             self.heartbeat_thread.set_session_active(True)
             self.heartbeat_thread.set_access_code(self.session_manager.access_code)
+        if self.realtime_thread:
+            self.realtime_thread.set_session_active(True)
         self.security.on_session_started()
 
     def _ensure_session_overlay(self):
@@ -256,6 +284,38 @@ class LockScreen(QMainWindow):
         self.activateWindow()
         self.code_input.setFocus()
         self._apply_production_ui()
+
+    def start_realtime(self):
+        if self.realtime_thread and self.realtime_thread.isRunning():
+            return
+
+        self.realtime_thread = RealtimeThread(self.current_pc_id)
+        self.realtime_thread.set_session_active(self.session_manager.is_active)
+        self.realtime_thread.command_signal.connect(self.security.handle_commands)
+        self.realtime_thread.config_update.connect(self._on_config_update)
+        self.realtime_thread.server_offline.connect(self._on_server_offline)
+        self.realtime_thread.server_online.connect(self._on_server_online)
+        self.realtime_thread.start()
+
+    def _on_server_offline(self):
+        if self.heartbeat_thread:
+            self.heartbeat_thread.set_ws_offline(True)
+        if self.session_manager.is_active:
+            self._offline_lock_timer.start(3000)
+
+    def _on_server_online(self):
+        self._offline_lock_timer.stop()
+        if self.heartbeat_thread:
+            self.heartbeat_thread.set_ws_offline(False)
+            self.heartbeat_thread.reset_offline_misses()
+
+    def _on_offline_lock_timeout(self):
+        if (
+            self.session_manager.is_active
+            and self.realtime_thread
+            and not self.realtime_thread.is_connected
+        ):
+            self.on_session_expired()
 
     def start_pc_heartbeat(self):
         if self.heartbeat_thread and self.heartbeat_thread.isRunning():
@@ -301,15 +361,17 @@ class LockScreen(QMainWindow):
         self.on_session_expired()
 
     def on_session_expired(self):
+        self._offline_lock_timer.stop()
         self.session_manager.clear_session()
         if self.heartbeat_thread:
             self.heartbeat_thread.set_session_active(False)
+        if self.realtime_thread:
+            self.realtime_thread.set_session_active(False)
         self.security.on_session_ended()
         self.show_lock_ui()
 
     def _admin_force_logout(self):
-        if self.session_manager.is_active:
-            self.session_manager.logout(self.current_pc_id)
+        # Server already paused the session when the admin command was queued.
         self.on_session_expired()
 
     def _admin_extend_session(self, additional_minutes: float):
@@ -364,20 +426,20 @@ class LockScreen(QMainWindow):
             QMessageBox.warning(self, "Staff Access", message)
             return
 
-        client_config.set_mode("dev")
+        client_config.unlock_staff_maintenance()
         self._apply_production_ui()
         QMessageBox.information(
             self,
             "Staff Access",
-            message or "Staff access granted. Dev controls enabled.",
+            message or "Staff maintenance enabled. Exit and settings are available until restart.",
         )
 
     def open_settings(self):
-        if client_config.is_production_mode():
+        if not client_config.is_exit_allowed():
             QMessageBox.information(
                 self,
                 "Settings",
-                "Settings are disabled in production mode. Use Staff access.",
+                "Settings are disabled. Staff master code required.",
             )
             return
 
@@ -440,14 +502,20 @@ class LockScreen(QMainWindow):
             if self.heartbeat_thread:
                 self.heartbeat_thread.stop()
             self.start_pc_heartbeat()
+            if self.realtime_thread:
+                self.realtime_thread.stop()
+            self.start_realtime()
 
             QMessageBox.information(self, "Settings", "Settings saved!")
 
     def keyPressEvent(self, event):
+        if should_block_quit_shortcut(event):
+            event.accept()
+            return
         if (
             event.key() == Qt.Key.Key_Escape
             and not self.session_manager.is_active
-            and not client_config.is_production_mode()
+            and client_config.is_exit_allowed()
         ):
             self.close()
             return
@@ -457,15 +525,30 @@ class LockScreen(QMainWindow):
             Qt.Key.Key_Control,
             Qt.Key.Key_Delete,
         ]:
+            event.accept()
             return
         super().keyPressEvent(event)
 
+    def changeEvent(self, event):
+        if (
+            event.type() == QEvent.Type.WindowStateChange
+            and client_config.is_production_mode()
+            and not self.session_manager.is_active
+        ):
+            if self.isMinimized() or not self.isFullScreen():
+                QTimer.singleShot(0, self.show_lock_ui)
+        super().changeEvent(event)
+
     def closeEvent(self, event):
-        if client_config.is_production_mode():
+        if should_block_window_close():
             event.ignore()
+            self.show_lock_ui()
             return
         if not self.session_manager.is_active:
+            self._offline_lock_timer.stop()
             self.security.stop()
+            if self.realtime_thread:
+                self.realtime_thread.stop()
             event.accept()
         else:
             event.ignore()

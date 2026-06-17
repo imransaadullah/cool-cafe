@@ -1,4 +1,4 @@
-from . import auth, pcs, sessions, codes, dashboard, filter_rules, payments, content_filter, webhooks, branches
+from . import auth, pcs, sessions, codes, dashboard, filter_rules, payments, content_filter, webhooks, branches, security
 
 __all__ = [
     "auth",
@@ -11,4 +11,5 @@ __all__ = [
     "content_filter",
     "webhooks",
     "branches",
+    "security",
 ]

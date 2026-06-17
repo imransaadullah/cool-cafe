@@ -115,6 +115,43 @@ async def run_matrix():
     r = await logout(LogoutRequest(code=code_same_pc, pc_id=pc1), db=db)
     checks.append(("cleanup same-PC session", r.success, r.message))
 
+    # Force admin pause preserves remaining time (60 min ticket, 30 min used)
+    code_force = await create_code(db, 60)
+    print(f"Force-logout code: {code_force}  PC1={pc1}\n")
+
+    r = await authenticate(AuthRequest(code=code_force, pc_id=pc1), db=db)
+    checks.append(("force-logout: start on PC1", r.success, r.message))
+    session = await db.session.find_first(
+        where={"codeId": (await db.code.find_unique(where={"code": code_force})).id},
+        order={"createdAt": "desc"},
+    )
+    if session:
+        from datetime import datetime, timedelta, timezone
+
+        await db.session.update(
+            where={"id": session.id},
+            data={
+                "startTime": datetime.now(timezone.utc) - timedelta(minutes=30),
+            },
+        )
+    from local_server.app.routes.sessions import (
+        _find_active_session_on_pc,
+        _pause_active_session,
+    )
+
+    active = await _find_active_session_on_pc(db, pc1)
+    if active:
+        await _pause_active_session(db, active, enforce_min_remaining=False)
+
+    r = await authenticate(AuthRequest(code=code_force, pc_id=pc1), db=db)
+    checks.append((
+        "force-logout: resume keeps remaining time",
+        r.success and 1700 <= (r.remaining_seconds or 0) <= 1900,
+        f"remaining={r.remaining_seconds}",
+    ))
+
+    await cleanup_pc(db, pc1)
+
     # PC transfer (60 min ticket = 2 re-logins)
     code_transfer = await create_code(db, 60)
     print(f"Transfer code: {code_transfer}  PC1={pc1}  PC2={pc2}\n")

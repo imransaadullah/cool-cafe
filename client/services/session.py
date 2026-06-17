@@ -31,7 +31,10 @@ class SessionManager:
         self.session_id = session_data.get("session_id")
         self.access_code = code
         self.is_active = True
-        self.remaining_seconds = float(session_data.get("remaining_seconds") or 0)
+        remaining = session_data.get("remaining_seconds")
+        if remaining is None:
+            remaining = session_data.get("remainingSeconds")
+        self.remaining_seconds = float(remaining or 0)
 
     def logout(self, pc_id: int) -> Tuple[bool, str]:
         if not self.access_code:

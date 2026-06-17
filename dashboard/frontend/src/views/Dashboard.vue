@@ -8,9 +8,17 @@
           :class="isConnected ? 'bg-success-500' : 'bg-danger-500'"
         ></span>
         <span class="text-sm text-gray-500">
-          {{ isConnected ? 'Connected' : 'Disconnected' }}
+          {{ isConnected ? 'Live' : 'Reconnecting…' }}
         </span>
       </div>
+    </div>
+
+    <div
+      v-if="floorAlert"
+      class="mb-4 p-3 rounded-lg bg-red-100 border border-red-400 text-red-800 flex justify-between items-center"
+    >
+      <span>{{ floorAlert }}</span>
+      <button class="text-sm underline" @click="floorAlert = ''">Dismiss</button>
     </div>
     
     <!-- Stats Cards -->
@@ -58,20 +66,24 @@
     
     <!-- PC Status Grid -->
     <div class="card mb-8">
-      <h2 class="text-lg font-semibold mb-4">PC Status</h2>
-      <div class="grid grid-cols-5 gap-4">
+      <h2 class="text-lg font-semibold mb-4">Live Floor Map</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         <div
           v-for="pc in pcs"
           :key="pc.id"
-          class="p-4 rounded-lg text-center cursor-pointer transition-all"
+          class="p-4 rounded-lg text-center cursor-pointer transition-all relative"
           :class="getPCStatusClass(pc)"
           @click="selectPC(pc)"
         >
+          <div v-if="pc.is_alarming" class="absolute top-1 right-1 text-red-600 animate-pulse">🚨</div>
           <div class="text-2xl mb-2">🖥️</div>
-          <div class="font-medium">{{ pc.name }}</div>
+          <div class="font-medium">{{ pc.name || `PC #${pc.pc_number}` }}</div>
           <div class="text-xs mt-1">{{ getPCStatusText(pc) }}</div>
-          <div v-if="pc.time_left" class="text-xs mt-1 font-mono">
+          <div v-if="pc.time_left != null" class="text-xs mt-1 font-mono" :class="getTimeLeftClass(pc)">
             {{ formatTime(pc.time_left) }}
+          </div>
+          <div v-if="!pc.client_running && pc.status !== 'offline'" class="text-xs text-yellow-700 mt-1">
+            Client down
           </div>
         </div>
       </div>
@@ -112,11 +124,12 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import api from '@/services/api'
 import { useWebSocket } from '@/composables/useWebSocket'
 
-const wsUrl = `ws://${window.location.hostname}:8000/ws`
+const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+const wsUrl = `${wsProtocol}//${window.location.host}/ws`
 const { isConnected, lastMessage, subscribeToPC } = useWebSocket(wsUrl)
 
 const stats = ref({
@@ -128,12 +141,14 @@ const stats = ref({
 
 const pcs = ref([])
 const recentSessions = ref([])
+const floorAlert = ref('')
+const branchId = ref(1)
 
 const fetchDashboardData = async () => {
   try {
     const [statsRes, pcsRes, sessionsRes] = await Promise.all([
-      api.get('/api/dashboard/overview'),
-      api.get('/api/pcs/'),
+      api.get('/api/dashboard/overview', { params: { branch_id: branchId.value } }),
+      api.get('/api/pcs/status'),
       api.get('/api/sessions/', { params: { status: 'active' } }),
     ])
     
@@ -145,37 +160,68 @@ const fetchDashboardData = async () => {
   }
 }
 
-// Handle WebSocket messages
+const showFloorToast = (message) => {
+  floorAlert.value = message
+  try {
+    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGWi77+efTRAMUKfj8LZjHAY4kdfyzHksBSR3x/DdkEAKFF606euoVRQKRp/g8r5sIQUrgc7y2Yk2CBlou+/nn00QDFCn4/C2YxwGOJHX8sx5LAUkd8fw3ZBAC')
+    audio.volume = 0.3
+    audio.play().catch(() => {})
+  } catch (_) {}
+}
+
 watch(lastMessage, (newMessage) => {
   if (!newMessage) return
   
   if (newMessage.type === 'pc_status') {
     const pcIndex = pcs.value.findIndex(pc => pc.id === newMessage.pc_id)
+    const merged = {
+      ...(pcIndex !== -1 ? pcs.value[pcIndex] : { id: newMessage.pc_id }),
+      ...newMessage.data,
+      status: newMessage.data.status,
+      time_left: newMessage.data.time_left,
+    }
     if (pcIndex !== -1) {
-      pcs.value[pcIndex] = {
-        ...pcs.value[pcIndex],
-        status: newMessage.data.status,
-        time_left: newMessage.data.time_left,
+      const prev = pcs.value[pcIndex]
+      if (newMessage.data.is_alarming && !prev.is_alarming) {
+        showFloorToast(`Alarm on ${prev.name || 'PC #' + prev.pc_number}`)
       }
+      if (newMessage.data.time_left != null && newMessage.data.time_left <= 300 && (prev.time_left == null || prev.time_left > 300)) {
+        showFloorToast(`Low time on ${prev.name || 'PC #' + prev.pc_number} (5 min left)`)
+      }
+      pcs.value[pcIndex] = merged
+    } else {
+      pcs.value.push(merged)
     }
   } else if (newMessage.type === 'session_update') {
     fetchDashboardData()
   } else if (newMessage.type === 'stats_update') {
-    stats.value = newMessage.data
+    stats.value = { ...stats.value, ...newMessage.data }
+  } else if (newMessage.type === 'alarm') {
+    showFloorToast(newMessage.message || 'Security alarm triggered')
   }
 })
 
 const getPCStatusClass = (pc) => {
-  if (pc.status === 'in_use') return 'bg-warning-100 border-2 border-warning-500'
+  if (pc.is_alarming) return 'bg-red-200 border-2 border-red-600'
+  if (!pc.client_running || pc.status === 'offline') return 'bg-gray-200 border-2 border-gray-400'
+  if (pc.time_left != null && pc.time_left <= 300) return 'bg-amber-100 border-2 border-amber-500'
+  if (pc.status === 'in_use' || pc.has_active_session) return 'bg-warning-100 border-2 border-warning-500'
   if (pc.status === 'online') return 'bg-success-100 border-2 border-success-500'
   return 'bg-gray-100 border-2 border-gray-300'
 }
 
 const getPCStatusText = (pc) => {
-  if (pc.status === 'in_use') return 'In Use'
+  if (pc.is_alarming) return 'ALARM'
+  if (pc.status === 'offline' || !pc.client_running) return 'Offline'
+  if (pc.status === 'in_use' || pc.has_active_session) return 'In Use'
   if (pc.status === 'online') return 'Available'
-  if (pc.status === 'offline') return 'Offline'
-  return 'Maintenance'
+  return 'Idle'
+}
+
+const getTimeLeftClass = (pc) => {
+  if (pc.time_left <= 60) return 'text-red-700 font-bold'
+  if (pc.time_left <= 300) return 'text-amber-700 font-semibold'
+  return 'text-gray-700'
 }
 
 const getSessionStatusClass = (status) => {
@@ -189,7 +235,7 @@ const getSessionStatusClass = (status) => {
 }
 
 const formatNumber = (num) => {
-  return num.toLocaleString()
+  return (num || 0).toLocaleString()
 }
 
 const formatTime = (seconds) => {

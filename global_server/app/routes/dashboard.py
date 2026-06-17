@@ -32,8 +32,9 @@ async def get_global_overview(db: Prisma = Depends(get_db)):
     total_admins = await db.admin.count()
     
     # In a real implementation, we'd check sync status
-    branches_synced = total_branches
-    branches_pending = 0
+    pending_count = await db.offlinequeue.count(where={"synced": False})
+    branches_synced = max(0, total_branches - (1 if pending_count else 0))
+    branches_pending = 1 if pending_count else 0
     
     return GlobalDashboard(
         total_branches=total_branches,
@@ -51,6 +52,7 @@ async def get_branch_summaries(db: Prisma = Depends(get_db)):
     
     summaries = []
     for branch in branches:
+        pending = await db.offlinequeue.count(where={"synced": False})
         summaries.append(
             BranchSummary(
                 branch_id=branch.id,
@@ -58,7 +60,7 @@ async def get_branch_summaries(db: Prisma = Depends(get_db)):
                 last_sync_at=branch.lastSyncAt.isoformat()
                 if branch.lastSyncAt
                 else None,
-                status="synced" if branch.lastSyncAt else "never_synced",
+                status="pending" if pending else ("synced" if branch.lastSyncAt else "never_synced"),
             )
         )
     

@@ -37,17 +37,25 @@ class CyberCafeWatchdog(win32serviceutil.ServiceFramework):
     
     def _get_client_path(self) -> str:
         """Get the path to the client executable."""
-        # Default installation path
-        default_path = r"C:\Program Files\CyberCafe\client\CyberCafe Client.exe"
+        try:
+            from services.paths import get_app_dir
+            app_dir = get_app_dir()
+        except Exception:
+            app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        packaged = os.path.join(app_dir, "CyberCafe Client.exe")
+        if os.path.exists(packaged):
+            return packaged
+
+        default_path = r"C:\Program Files\CyberCafe Client\CyberCafe Client.exe"
         if os.path.exists(default_path):
             return default_path
-        
-        # Try relative path
-        relative_path = os.path.join(os.path.dirname(__file__), "..", "client", "main.py")
+
+        relative_path = os.path.join(app_dir, "main.py")
         if os.path.exists(relative_path):
             return relative_path
-        
-        return default_path
+
+        return packaged
     
     def SvcStop(self):
         """Stop the service."""

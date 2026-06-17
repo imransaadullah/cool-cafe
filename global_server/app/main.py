@@ -5,6 +5,10 @@ from shared.database import db
 from .routes import auth, branches, sync, dashboard
 import sys
 import os
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path for shared imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -36,6 +40,19 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 @app.on_event("startup")
 async def startup_event():
     await db.connect()
+
+    async def _queue_loop():
+        from .services.sync_processor import process_pending_queue
+        while True:
+            try:
+                count = await process_pending_queue(db)
+                if count:
+                    logger.info("Processed %s global sync queue items", count)
+            except Exception as exc:
+                logger.warning("Global sync processor error: %s", exc)
+            await asyncio.sleep(60)
+
+    asyncio.create_task(_queue_loop())
 
 
 @app.on_event("shutdown")

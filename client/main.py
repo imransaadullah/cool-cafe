@@ -13,12 +13,37 @@ if "--reset" in sys.argv:
     reset_client(skip_confirm="--yes" in sys.argv or "-y" in sys.argv)
     sys.argv = [arg for arg in sys.argv if arg not in ("--reset", "--yes", "-y")]
 
+if "--install-watchdog" in sys.argv:
+    from services.watchdog_install import install_watchdog
+
+    ok, messages = install_watchdog()
+    for line in messages:
+        print(line)
+    sys.exit(0 if ok else 1)
+
+if "--install-autostart" in sys.argv:
+    from services.watchdog_install import install_autostart
+
+    ok, messages = install_autostart()
+    for line in messages:
+        print(line)
+    sys.exit(0 if ok else 1)
+
+if "--uninstall-watchdog" in sys.argv:
+    from services.watchdog_install import uninstall_watchdog
+
+    ok, messages = uninstall_watchdog()
+    for line in messages:
+        print(line)
+    sys.exit(0 if ok else 1)
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from ui.lock_screen import LockScreen
 from ui.setup_wizard import SetupWizard, check_first_run
 from services.config_manager import client_config
 from services.single_instance import SingleInstanceGuard, activate_main_window
+from services.kiosk_guard import install_app_kiosk_guard
 
 
 def apply_theme(app, theme="dark"):
@@ -138,6 +163,9 @@ def show_lock_screen(app):
     else:
         app.main_window.show()
 
+    if client_config.is_production_mode() and not app.main_window.session_manager.is_active:
+        app.main_window.showFullScreen()
+
     if not app.main_window.session_manager.is_active:
         app.main_window.raise_()
         app.main_window.activateWindow()
@@ -148,6 +176,10 @@ def main():
         app = QApplication(sys.argv)
         app.setApplicationName("CyberCafe Client")
         app.setOrganizationName("CyberCafe")
+        install_app_kiosk_guard(app)
+
+        if "--dev" in sys.argv:
+            client_config.set_mode("dev")
 
         guard = SingleInstanceGuard(on_activate=activate_main_window)
         if not guard.try_acquire():

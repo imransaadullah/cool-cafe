@@ -17,7 +17,9 @@ from shared.system_cleanup import run_full_cleanup
 
 def main() -> int:
     app_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else CLIENT_DIR
-    watchdog_script = app_dir / "services" / "watchdog_service.py"
+    watchdog_script = app_dir / "CyberCafeWatchdog.exe"
+    if not watchdog_script.exists():
+        watchdog_script = app_dir / "services" / "watchdog_service.py"
     _, messages = run_full_cleanup(
         app_dir=app_dir,
         watchdog_script=watchdog_script,

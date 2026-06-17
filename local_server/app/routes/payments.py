@@ -79,6 +79,21 @@ async def initialize_payment(
             where={"id": payment.id},
             data={"status": "completed"},
         )
+
+        from ..services.sync_worker import queue_sync_event
+        await queue_sync_event(
+            db,
+            "upsert",
+            "payments",
+            payment.localId,
+            {
+                "local_id": payment.localId,
+                "branch_id": request.branch_id,
+                "amount": request.amount,
+                "method": request.method,
+                "status": "completed",
+            },
+        )
         
         return PaymentResponse(
             success=True,

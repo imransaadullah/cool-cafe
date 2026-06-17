@@ -4,8 +4,10 @@ from prisma import Prisma
 from shared.database import get_db
 from shared.orm_model import ORMModel
 from ..services.printer import code_printer
+from ..services.sync_worker import queue_sync_event
 import random
 import string
+import uuid
 from datetime import datetime, timezone
 from pydantic import BaseModel
 from typing import Optional, List
@@ -25,6 +27,22 @@ class CodeBatchCreate(BaseModel):
     duration_minutes: float
     value_per_code: float = 0
     batch_name: Optional[str] = None
+
+
+class SellTimeRequest(BaseModel):
+    branch_id: int
+    duration_minutes: float
+    amount: float
+    method: str = "cash"
+    batch_name: Optional[str] = None
+
+
+class SellTimeResponse(BaseModel):
+    code: str
+    duration_minutes: float
+    amount: float
+    payment_reference: str
+    batch_id: int
 
 
 class CodeBatchResponse(ORMModel):
@@ -112,6 +130,78 @@ async def create_batch(batch_data: CodeBatchCreate, db: Prisma = Depends(get_db)
         )
     
     return batch
+
+
+@router.post("/sell", response_model=SellTimeResponse)
+async def sell_time_at_counter(
+    request: SellTimeRequest,
+    db: Prisma = Depends(get_db),
+):
+    """Counter checkout: record payment, issue a single-use time code, ready to print."""
+    if request.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    if request.duration_minutes <= 0:
+        raise HTTPException(status_code=400, detail="Duration must be positive")
+
+    reference = f"CC_{uuid.uuid4().hex[:12].upper()}"
+    payment = await db.payment.create(
+        data={
+            "branchId": request.branch_id,
+            "amount": request.amount,
+            "method": request.method,
+            "reference": reference,
+            "status": "completed",
+            "localId": str(uuid.uuid4()),
+        }
+    )
+
+    batch = await db.codebatch.create(
+        data={
+            "branchId": request.branch_id,
+            "count": 1,
+            "durationMinutes": request.duration_minutes,
+            "valuePerCode": request.amount,
+            "batchName": request.batch_name or f"Counter {reference}",
+        }
+    )
+
+    while True:
+        code_value = generate_code()
+        existing = await db.code.find_unique(where={"code": code_value})
+        if not existing:
+            break
+
+    code = await db.code.create(
+        data={
+            "code": code_value,
+            "durationMinutes": request.duration_minutes,
+            "batchId": batch.id,
+            "branchId": request.branch_id,
+            "value": request.amount,
+        }
+    )
+
+    await queue_sync_event(
+        db,
+        "upsert",
+        "payments",
+        payment.localId,
+        {
+            "local_id": payment.localId,
+            "branch_id": request.branch_id,
+            "amount": request.amount,
+            "method": request.method,
+            "status": "completed",
+        },
+    )
+
+    return SellTimeResponse(
+        code=code.code,
+        duration_minutes=code.durationMinutes,
+        amount=request.amount,
+        payment_reference=reference,
+        batch_id=batch.id,
+    )
 
 
 @router.get("/batches/{batch_id}/codes", response_model=List[CodeResponse])

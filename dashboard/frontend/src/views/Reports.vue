@@ -150,6 +150,12 @@ const averageDuration = computed(() => {
 
 const fetchReports = async () => {
   try {
+    await api.post('/api/dashboard/revenue/generate', null, {
+      params: {
+        branch_id: 1,
+        report_date: endDate.value,
+      },
+    })
     const response = await api.get('/api/dashboard/revenue', {
       params: {
         start_date: startDate.value,

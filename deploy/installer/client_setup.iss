@@ -6,6 +6,8 @@
 #define MyAppPublisher "CyberCafe"
 #define MyAppURL "https://cybercafe.com"
 #define MyAppExeName "CyberCafe Client.exe"
+#define MyWatchdogExeName "CyberCafeWatchdog.exe"
+#define MyCleanupExeName "CyberCafeCleanup.exe"
 
 [Setup]
 AppId={{B2C3D4E5-F6A7-8901-BCDE-F12345678901}
@@ -36,9 +38,10 @@ Name: "installservice"; Description: "Install Watchdog Service"; GroupDescriptio
 Name: "autostart"; Description: "Start with Windows"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
-Source: "dist\CyberCafe Client\CyberCafe Client.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\CyberCafe Client\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\..\client\uninstall_cleanup.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\client\dist\CyberCafe Client\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\client\dist\CyberCafe Client\{#MyWatchdogExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\client\dist\CyberCafe Client\{#MyCleanupExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\client\dist\CyberCafe Client\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "config.example.json"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
@@ -48,45 +51,33 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
+Filename: "{app}\{#MyWatchdogExeName}"; Parameters: "install"; StatusMsg: "Installing watchdog service..."; Tasks: installservice; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyWatchdogExeName}"; Parameters: "start"; StatusMsg: "Starting watchdog service..."; Tasks: installservice; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--install-autostart"; StatusMsg: "Configuring autostart..."; Tasks: autostart; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{sys}\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""& python '{app}\uninstall_cleanup.py' '{app}'"""; Flags: runhidden; RunOnceId: "CyberCafeCleanup"
+Filename: "{app}\{#MyWatchdogExeName}"; Parameters: "stop"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyWatchdogExeName}"; Parameters: "remove"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyCleanupExeName}"; Parameters: """{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "CyberCafeCleanup"
 
 [Registry]
-; Auto-start on boot
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "CyberCafeClient"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart
 
-; Disable Task Manager (optional security)
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Policies\System"; ValueType: dword; ValueName: "DisableTaskMgr"; ValueData: "0"; Flags: uninsdeletevalue
-
 [Code]
-// Check if server is reachable
-function IsServerReachable: Boolean;
-var
-  ResultCode: Integer;
-begin
-  Result := Exec('cmd', '/c ping -n 1 localhost', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
-end;
-
 function InitializeSetup: Boolean;
 var
   ConfigFile: string;
   ServerURL: string;
 begin
   Result := True;
-  
   ConfigFile := ExpandConstant('{app}\config.json');
-  
-  // Check if config exists
   if not FileExists(ConfigFile) then
   begin
-    ServerURL := InputBox('Server Configuration', 'Enter the cafe server IP (e.g. http://192.168.1.100:8000):', '');
+    ServerURL := InputBox('Server Configuration', 'Enter the cafe server IP (e.g. http://192.168.1.100:8000):', 'http://192.168.1.100:8000');
     if ServerURL = '' then
       ServerURL := 'http://192.168.1.100:8000';
-    
-    // Create config file (setup wizard runs on first launch)
-    SaveStringToFile(ConfigFile, 
+    SaveStringToFile(ConfigFile,
       '{' + #13#10 +
       '  "configured": false,' + #13#10 +
       '  "server_url": "' + ServerURL + '",' + #13#10 +

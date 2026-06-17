@@ -155,8 +155,12 @@ def resolve_client_mode(
     server_config: Optional[Dict[str, Any]] = None,
     local_mode: Optional[str] = None,
 ) -> str:
-    if local_mode in ("production", "dev"):
-        return local_mode
-    if server_config and server_config.get("client_mode") in ("production", "dev"):
-        return server_config["client_mode"]
+    """Server production mode always wins; local dev is for developer machines only."""
+    server_mode = (server_config or {}).get("client_mode")
+    if server_mode == "production":
+        return "production"
+    if local_mode == "dev":
+        return "dev"
+    if server_mode == "dev":
+        return "dev"
     return "production"

@@ -8,6 +8,7 @@ from shared.utils.auth import (
     verify_password,
     create_access_token,
 )
+from ..auth_deps import get_current_admin, AdminUser
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta
@@ -106,6 +107,13 @@ async def login(login_data: LoginRequest, db: Prisma = Depends(get_db)):
 
 @router.post("/create", response_model=AdminResponse)
 async def create_admin(admin_data: AdminCreate, db: Prisma = Depends(get_db)):
+    """Create admin. Open when no admins exist; otherwise requires owner/branch_admin."""
+    existing_count = await db.admin.count()
+    if existing_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Use authenticated admin endpoint to create additional admins",
+        )
     # Check if username exists
     existing = await db.admin.find_unique(where={"username": admin_data.username})
     if existing:
@@ -129,8 +137,11 @@ async def create_admin(admin_data: AdminCreate, db: Prisma = Depends(get_db)):
 
 
 @router.get("/me", response_model=AdminResponse)
-async def get_current_user(username: str, db: Prisma = Depends(get_db)):
-    admin = await db.admin.find_unique(where={"username": username})
+async def get_me(
+    current: AdminUser = Depends(get_current_admin),
+    db: Prisma = Depends(get_db),
+):
+    admin = await db.admin.find_unique(where={"username": current.username})
     if not admin:
         raise HTTPException(status_code=404, detail="Admin not found")
     return admin

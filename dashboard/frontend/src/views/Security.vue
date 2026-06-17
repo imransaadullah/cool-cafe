@@ -225,7 +225,7 @@
               </span>
             </td>
             <td>PC #{{ log.pc_id }}</td>
-            <td>{{ log.details }}</td>
+            <td>{{ formatAuditDetails(log.details) }}</td>
           </tr>
         </tbody>
       </table>
@@ -418,6 +418,14 @@ const formatDate = (dateStr) => {
 const formatTime = (seconds) => {
   const mins = Math.floor(seconds / 60)
   return `${mins} min`
+}
+
+const formatAuditDetails = (details) => {
+  if (!details) return ''
+  if (typeof details === 'object') {
+    return details.reason || details.method || JSON.stringify(details)
+  }
+  return String(details)
 }
 
 onMounted(() => {

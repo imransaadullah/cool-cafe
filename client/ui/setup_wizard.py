@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
 from services.config_manager import client_config
+from services.kiosk_guard import should_block_window_close
 
 
 def get_local_ip():
@@ -79,6 +80,7 @@ class SetupWizard(QMainWindow):
         
         # Callback to launch lock screen after setup
         self.lock_screen_callback = None
+        self._allow_close = False
         
         self.setup_ui()
     
@@ -424,6 +426,11 @@ class SetupWizard(QMainWindow):
             client_config.set("heartbeat_interval", self.heartbeat_input.value())
             client_config.set("security.alarm_enabled", self.alarm_checkbox.isChecked())
             client_config.set("security.alarm_color", self.alarm_color_input.text())
+            from services.watchdog_install import apply_security_options
+            apply_security_options(
+                run_as_service=self.service_checkbox.isChecked(),
+                auto_start_enabled=self.auto_start_checkbox.isChecked(),
+            )
         
         # Go to next step
         if current < 4:
@@ -448,9 +455,16 @@ class SetupWizard(QMainWindow):
     def start_client(self):
         """Start the main client."""
         client_config.set("configured", True)
+        self._allow_close = True
         self.close()
         if self.lock_screen_callback:
             self.lock_screen_callback()
+
+    def closeEvent(self, event):
+        if not self._allow_close and should_block_window_close():
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 
 def check_first_run() -> bool:

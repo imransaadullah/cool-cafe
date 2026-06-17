@@ -198,6 +198,57 @@ async def _forfeit_paused_session(db: Prisma, session, status: str = "forfeited"
     await _close_session(db, session, status=status)
 
 
+async def _find_active_session_on_pc(db: Prisma, pc_id: int):
+    """Find the active session currently tied to a PC."""
+    pc = await db.pc.find_unique(where={"id": pc_id})
+    if pc and pc.currentSessionId:
+        session = await db.session.find_unique(where={"id": pc.currentSessionId})
+        if session and session.isActive and session.status == "active":
+            return session
+
+    return await db.session.find_first(
+        where={
+            "currentPcId": pc_id,
+            "status": "active",
+            "isActive": True,
+        },
+        order={"updatedAt": "desc"},
+    )
+
+
+async def _pause_active_session(
+    db: Prisma,
+    session,
+    *,
+    enforce_min_remaining: bool = True,
+) -> float:
+    """Pause an active session, store remaining time, and detach from its PC."""
+    session = await db.session.find_unique(where={"id": session.id})
+    if not session or not session.isActive or session.status != "active":
+        raise HTTPException(status_code=400, detail="No active session to pause")
+
+    remaining = max(0.0, _active_remaining_minutes(session))
+    if enforce_min_remaining and remaining < MIN_REMAINING_MINUTES_TO_RESUME:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Less than {MIN_REMAINING_MINUTES_TO_RESUME} minutes remaining, "
+                "cannot pause"
+            ),
+        )
+
+    await db.session.update(
+        where={"id": session.id},
+        data={
+            "status": "paused",
+            "pausedAt": utcnow(),
+            "remainingMinutes": remaining,
+        },
+    )
+    await _detach_session_from_pc(db, session)
+    return remaining
+
+
 async def _resolve_pc_conflict(db: Prisma, pc, code, session_for_code):
     if not pc.currentSessionId:
         return None
@@ -241,11 +292,18 @@ def _can_resume_paused(session) -> Tuple[bool, str]:
 
 
 async def _resume_paused_session(db: Prisma, session, pc_id: int) -> AuthResponse:
+    session = await db.session.find_unique(where={"id": session.id})
+    if not session or session.status != "paused":
+        return AuthResponse(success=False, message="Session is not paused")
+
     can_resume, message = _can_resume_paused(session)
     if not can_resume:
         return AuthResponse(success=False, message=message, session_id=session.id)
 
-    remaining = session.remainingMinutes or 0
+    remaining = min(
+        session.durationMinutes,
+        max(0.0, session.remainingMinutes or 0),
+    )
     total_paused = session.totalPausedMinutes or 0
     if session.pausedAt:
         paused_duration = (utcnow() - _ensure_utc(session.pausedAt)).total_seconds() / 60
@@ -413,15 +471,14 @@ async def logout(request: LogoutRequest, db: Prisma = Depends(get_db)):
             message=f"Less than {MIN_REMAINING_MINUTES_TO_RESUME} minutes remaining, cannot logout",
         )
 
-    await db.session.update(
-        where={"id": session.id},
-        data={
-            "status": "paused",
-            "pausedAt": utcnow(),
-            "remainingMinutes": remaining,
-        },
-    )
-    await _detach_session_from_pc(db, session)
+    try:
+        remaining = await _pause_active_session(
+            db,
+            session,
+            enforce_min_remaining=True,
+        )
+    except HTTPException as exc:
+        return LogoutResponse(success=False, message=str(exc.detail))
 
     return LogoutResponse(
         success=True,
@@ -577,22 +634,11 @@ async def pause_session(session_id: int, db: Prisma = Depends(get_db)):
     if session.status != "active":
         raise HTTPException(status_code=400, detail="Session is not active")
 
-    remaining = _active_remaining_minutes(session)
-    if remaining < MIN_REMAINING_MINUTES_TO_RESUME:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Less than {MIN_REMAINING_MINUTES_TO_RESUME} minutes remaining, cannot pause",
-        )
-
-    await db.session.update(
-        where={"id": session_id},
-        data={
-            "status": "paused",
-            "pausedAt": utcnow(),
-            "remainingMinutes": remaining,
-        },
+    remaining = await _pause_active_session(
+        db,
+        session,
+        enforce_min_remaining=True,
     )
-    await _detach_session_from_pc(db, session)
 
     return {"detail": "Session paused", "remaining_minutes": remaining}
 

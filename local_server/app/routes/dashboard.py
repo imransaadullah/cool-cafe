@@ -5,6 +5,9 @@ from shared.orm_model import ORMModel
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, date
+from ..services.revenue import sum_revenue, compute_daily_metrics
+from ..services.sync_worker import queue_sync_event
+import uuid
 
 router = APIRouter()
 
@@ -71,12 +74,15 @@ async def get_overview(branch_id: int = None, db: Prisma = Depends(get_db)):
     if branch_id:
         where_code["branchId"] = branch_id
     codes_sold_today = await db.code.count(where=where_code)
+
+    today_end = datetime.combine(date.today(), datetime.max.time())
+    total_revenue_today = await sum_revenue(db, branch_id, today_start, today_end)
     
     return DashboardOverview(
         total_pcs=total_pcs,
         online_pcs=online_pcs,
         active_sessions=active_sessions,
-        total_revenue_today=0,  # Would need to aggregate payments
+        total_revenue_today=total_revenue_today,
         total_sessions_today=total_sessions_today,
         codes_sold_today=codes_sold_today,
     )
@@ -124,37 +130,39 @@ async def generate_daily_report(
     if existing:
         return {"detail": "Report already exists", "report_id": existing.id}
     
-    # Calculate metrics
-    day_start = datetime.combine(report_date, datetime.min.time())
-    day_end = datetime.combine(report_date, datetime.max.time())
+    metrics = await compute_daily_metrics(db, branch_id, report_date)
     
-    # Total sessions
-    total_sessions = await db.session.count(
-        where={
-            "branchId": branch_id,
-            "createdAt": {"gte": day_start, "lte": day_end},
-        }
-    )
-    
-    # Total codes used
-    total_codes_used = await db.code.count(
-        where={
-            "branchId": branch_id,
-            "usedAt": {"gte": day_start, "lte": day_end},
-        }
-    )
-    
-    # Create report
     report = await db.revenuereport.create(
         data={
             "branchId": branch_id,
             "reportDate": datetime.combine(report_date, datetime.min.time()),
             "reportType": "daily",
-            "totalRevenue": 0,  # Would need to aggregate payments
-            "totalSessions": total_sessions,
-            "totalCodesUsed": total_codes_used,
-            "averageSessionDuration": 0,
+            "totalRevenue": metrics["total_revenue"],
+            "totalSessions": metrics["total_sessions"],
+            "totalCodesUsed": metrics["total_codes_used"],
+            "totalPausedSessions": metrics["total_paused_sessions"],
+            "averageSessionDuration": metrics["average_session_duration"],
+            "peakHourStart": metrics["peak_hour_start"],
+            "peakHourEnd": metrics["peak_hour_end"],
+            "localId": str(uuid.uuid4()),
         }
+    )
+
+    await queue_sync_event(
+        db,
+        "upsert",
+        "revenue_reports",
+        str(report.id),
+        {
+            "local_id": report.localId,
+            "branch_id": branch_id,
+            "report_date": report_date.isoformat(),
+            "report_type": "daily",
+            "total_revenue": metrics["total_revenue"],
+            "total_sessions": metrics["total_sessions"],
+            "total_codes_used": metrics["total_codes_used"],
+            "average_session_duration": metrics["average_session_duration"],
+        },
     )
     
     return {"detail": "Report generated", "report_id": report.id}

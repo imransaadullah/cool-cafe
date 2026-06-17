@@ -16,6 +16,7 @@ export function useWebSocket(url) {
       ws.onopen = () => {
         isConnected.value = true
         console.log('WebSocket connected')
+        send({ type: 'dashboard_register' })
         startHeartbeat()
       }
       

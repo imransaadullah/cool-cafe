@@ -126,6 +126,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class AdminAuthMiddleware(BaseHTTPMiddleware):
+    """Require JWT on mutating admin API routes."""
+
+    async def dispatch(self, request: Request, call_next):
+        from .auth_deps import enforce_admin_auth
+
+        return await enforce_admin_auth(request, call_next)
+
+
 class CORSMiddleware(BaseHTTPMiddleware):
     """Custom CORS middleware."""
     

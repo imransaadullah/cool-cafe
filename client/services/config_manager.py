@@ -19,7 +19,7 @@ class ClientConfig:
     
     DEFAULT_CONFIG = {
         "configured": False,
-        "mode": "dev",
+        "mode": "production",
         "server_url": "http://localhost:8000",
         "pc_id": 1,
         "pc_number": 1,
@@ -60,6 +60,7 @@ class ClientConfig:
 
         self.config_path = Path(config_path)
         self.config = copy.deepcopy(self.DEFAULT_CONFIG)
+        self._staff_maintenance_unlock = False
         self._load()
     
     def _load(self):
@@ -169,7 +170,20 @@ class ClientConfig:
 
     def is_production_mode(self) -> bool:
         """True when client runs in production (kiosk-hardened) mode."""
-        return self.get("mode", "dev") == "production"
+        return self.get("mode", "production") == "production"
+
+    def is_exit_allowed(self) -> bool:
+        """Customers cannot exit in production; staff unlock enables maintenance."""
+        if self._staff_maintenance_unlock:
+            return True
+        return not self.is_production_mode()
+
+    def unlock_staff_maintenance(self):
+        """Temporary in-memory unlock for staff (not persisted)."""
+        self._staff_maintenance_unlock = True
+
+    def lock_staff_maintenance(self):
+        self._staff_maintenance_unlock = False
 
     def set_mode(self, mode: str):
         if mode in ("production", "dev"):

@@ -15,6 +15,7 @@ from services.paths import app_path
 
 
 OFFLINE_GRACE_INTERVALS = 6  # lock after ~6 failed session heartbeats
+OFFLINE_GRACE_WS_DOWN = 2  # faster fallback when WebSocket is already down
 
 
 class HeartbeatThread(QThread):
@@ -38,6 +39,13 @@ class HeartbeatThread(QThread):
         self.session_active = False
         self.app_version = "1.0.0"
         self._offline_misses = 0
+        self._ws_offline = False
+
+    def set_ws_offline(self, offline: bool):
+        self._ws_offline = offline
+
+    def _offline_threshold(self) -> int:
+        return OFFLINE_GRACE_WS_DOWN if self._ws_offline else OFFLINE_GRACE_INTERVALS
 
     def set_session_active(self, active: bool):
         self.session_active = active
@@ -63,6 +71,7 @@ class HeartbeatThread(QThread):
 
                 if response.status_code == 200:
                     data = response.json()
+                    self._offline_misses = 0
                     self.status_update.emit(data)
 
                     if data.get("is_banned"):
@@ -83,7 +92,7 @@ class HeartbeatThread(QThread):
             except requests.exceptions.RequestException:
                 if self.session_active:
                     self._offline_misses += 1
-                    if self._offline_misses >= OFFLINE_GRACE_INTERVALS:
+                    if self._offline_misses >= self._offline_threshold():
                         self.lock_signal.emit()
 
             time.sleep(self.heartbeat_interval)
@@ -100,12 +109,12 @@ class HeartbeatThread(QThread):
                 self.session_update.emit(response.json())
             elif self.session_active:
                 self._offline_misses += 1
-                if self._offline_misses >= OFFLINE_GRACE_INTERVALS:
+                if self._offline_misses >= self._offline_threshold():
                     self.lock_signal.emit()
         except requests.exceptions.RequestException:
             if self.session_active:
                 self._offline_misses += 1
-                if self._offline_misses >= OFFLINE_GRACE_INTERVALS:
+                if self._offline_misses >= self._offline_threshold():
                     self.lock_signal.emit()
 
     def report_bypass(self, event_type: str):
@@ -147,6 +156,9 @@ class HeartbeatThread(QThread):
 
         with open(queue_file, "w") as f:
             json.dump(queue, f)
+
+    def reset_offline_misses(self):
+        self._offline_misses = 0
 
     def stop(self, wait: bool = True):
         self.running = False

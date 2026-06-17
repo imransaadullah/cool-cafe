@@ -65,3 +65,6 @@ class SessionOverlay(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self.position_corner()
+
+    def closeEvent(self, event):
+        event.ignore()

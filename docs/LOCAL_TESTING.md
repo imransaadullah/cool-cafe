@@ -1,230 +1,304 @@
 # Local Testing Guide
 
-Test the entire CyberCafe system on a single laptop.
+Test the full CyberCafe stack on a single Windows PC (or laptop acting as server + one client).
+
+See also: [README](../README.md) · [Distribution guide](../deploy/DISTRIBUTION.md)
+
+---
 
 ## Prerequisites
 
-1. **PostgreSQL** - Install from https://www.postgresql.org/download/windows/
-2. **Python 3.11+** - Install from python.org
-3. **Node.js 18+** - Install from nodejs.org
-4. **Git** - Optional, for cloning
+| Requirement | Notes |
+|-------------|--------|
+| **PostgreSQL** | https://www.postgresql.org/download/windows/ |
+| **Python 3.11+** | python.org or Microsoft Store |
+| **Node.js 18+** | For dashboard dev server |
+| **Git** | To clone the repo |
 
-## Quick Setup (Automated)
+---
 
-```bash
-# Run the setup wizard
-python setup_wizard.py
+## Fastest path: `start_test.bat`
 
-# Or use the test script
-python test_local.py
-```
+From the repo root:
 
-## Manual Setup
-
-### 1. Database Setup
-
-```bash
-# Create database
-createdb cybercafe
-
-# Or using psql
-psql -U postgres -c "CREATE DATABASE cybercafe;"
-```
-
-### 2. Environment Configuration
-
-```bash
-# Copy example env
+```bat
 copy .env.example .env
-
-# Edit .env with your settings
-# Minimum changes needed:
-# - DATABASE_URL (if different password)
-# - SECRET_KEY (generate a random one)
+start_test.bat
 ```
 
-### 3. Install Dependencies
+This script:
 
-```bash
-# Server dependencies
-pip install -r local_server/requirements.txt
+1. Runs `setup.py` (dependencies, admin seed, dashboard `npm install`)
+2. Syncs Prisma schema and client (`setup.py --prisma-only`)
+3. Starts the local API (`scripts\start_server.bat`)
+4. Waits for http://localhost:8000/api/health
+5. Starts the dashboard dev server (`scripts\start_dashboard.bat`)
+6. Optionally launches the client on the same machine
 
-# Prisma
-pip install prisma
+### Access points after `start_test.bat`
 
-# Dashboard
-cd dashboard/frontend
-npm install
-cd ../..
+| Service | URL |
+|---------|-----|
+| Local server API | http://localhost:8000 |
+| API docs (Swagger) | http://localhost:8000/api/docs |
+| Dashboard (dev) | http://localhost:7842 |
+| Health check | http://localhost:8000/api/health |
+
+### Default login
+
+| Username | Password |
+|----------|----------|
+| `admin` | `admin123` |
+
+(Set by `setup.py` / `scripts\create_admin.py` / seed — change after first login in production.)
+
+---
+
+## Alternative: Server Manager (production-like GUI)
+
+Runs API + **embedded** dashboard on port 8000 in one desktop app:
+
+```bat
+scripts\start_server_manager.bat
 ```
 
-### 4. Database Setup
+On first launch (or with `--setup`), the **installation wizard** collects:
 
-```bash
-# Generate Prisma client
-prisma generate
+1. PostgreSQL connection
+2. Café / branch name
+3. Admin account
+4. Network port and client URL hint
+5. Schema push and branch creation
 
-# Push schema to database
-prisma db push
+Re-run setup: **Settings → Run Setup Wizard** in the manager, or:
 
-# Create admin user
-python scripts/create_admin.py
-```
-
-### First-time server installation
-
-When you launch **CyberCafe Server** for the first time (or run with `--setup`), the **installation wizard** runs automatically:
-
-1. **PostgreSQL** — host, port, credentials (creates `cybercafe` DB if missing)
-2. **Café / branch** — names and optional address
-3. **Admin account** — username and password for the dashboard
-4. **Network** — server port and LAN URL shown for client PCs
-5. **Install** — writes `.env`, applies schema, creates branch + admin
-
-After setup, the server manager opens and can start services + dashboard.
-
-Re-run setup anytime: **Settings → Run Setup Wizard** (stop services first), or:
-
-```bash
+```bat
 cd local_server
 python server_manager.py --setup
 ```
 
-### 5. Start Services
+| Mode | Dashboard URL |
+|------|----------------|
+| Dev (`start_test.bat`) | http://localhost:7842 |
+| Server manager / installed build | http://localhost:8000 |
 
-**Recommended — Server Manager (API + dashboard in one app):**
+---
 
-```bash
-scripts\start_server_manager.bat
-# or: cd local_server && python server_manager.py
+## Manual setup (step by step)
+
+Use this if you prefer separate control or `start_test.bat` fails.
+
+### 1. Database
+
+```bat
+psql -U postgres -c "CREATE DATABASE cybercafe;"
 ```
 
-Opens a control window that starts the API, serves the built dashboard at http://localhost:8000/, and opens your browser. Use **Start** / **Stop** or the system tray.
+### 2. Environment
 
-**Development — separate terminals:**
-
-Open **3 terminal windows**:
-
-**Terminal 1 - Local Server:**
-```bash
-cd local_server
-uvicorn app.main:app --reload --port 8000
+```bat
+copy .env.example .env
 ```
 
-**Terminal 2 - Dashboard:**
-```bash
-cd dashboard/frontend
-npm run dev
+Edit `.env` — at minimum set `DATABASE_URL` and a strong `SECRET_KEY`.
+
+### 3. Dependencies
+
+```bat
+pip install -r local_server\requirements.txt
+pip install prisma
+cd dashboard\frontend && npm install && cd ..\..
 ```
 
-**Terminal 3 - Client (optional):**
-```bash
+### 4. Prisma
+
+```bat
+python scripts\prisma_generate.py
+prisma db push
+python scripts\create_admin.py
+```
+
+> **Windows Store Python:** use `python scripts\prisma_generate.py` instead of bare `prisma generate`.
+
+### 5. Start services (three terminals)
+
+**Terminal 1 — API:**
+
+```bat
+scripts\start_server.bat
+```
+
+**Terminal 2 — Dashboard:**
+
+```bat
+scripts\start_dashboard.bat
+```
+
+**Terminal 3 — Client (optional):**
+
+```bat
+client\start_client.bat
+```
+
+Or for debugging with console output:
+
+```bat
 cd client
-python main.py
+python main.py --dev
 ```
 
-## Access Points
+---
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| Local Server API | http://localhost:8000 | FastAPI backend |
-| API Docs | http://localhost:8000/api/docs | Swagger UI |
-| Dashboard (dev) | http://localhost:7842 | Vue dev server (`npm run dev`) |
-| Dashboard (manager) | http://localhost:8000 | Bundled with server manager / installer |
-| Client | Desktop app | PyQt6 lock screen |
+## Testing workflow
 
-## Default Credentials
+### 1. Login to dashboard
 
-| Username | Password | Role |
-|----------|----------|------|
-| admin | admin123 | Super Admin |
-| manager1 | manager123 | Branch Manager |
+Open http://localhost:7842 → login `admin` / `admin123`
 
-## Testing Workflow
+### 2. Branding (optional)
 
-### 1. Login to Dashboard
-- Open http://localhost:7842
-- Login with admin/admin123
+Go to **Branding** → set display name, colors, upload logo → Save.  
+Launch client to see lock screen branding after the next config sync.
 
-### 2. Create a Branch
-- Go to Branches page
-- Add a new branch
+### 3. Register a PC (via client setup)
 
-### 3. Add PCs
-- Go to PCs page
-- Add test PCs with IP addresses
+Run the client. First launch opens the **setup wizard**:
 
-### 4. Generate Access Codes
-- Go to Codes page
-- Generate a batch of codes
+- Server URL: `http://localhost:8000` (same PC) or `http://<LAN-IP>:8000` (other PCs)
+- PC name / number / branch ID
+- Security codes (static master + recovery combo)
 
-### 5. Test Client
-- Run the client: `cd client && python main.py`
-- Enter a code to start session
-- Watch timer count down
+Or register from dashboard **PCs** page.
 
-### 6. Monitor in Dashboard
-- Dashboard shows real-time PC status
-- Session timer updates live
+### 4. Sell or generate access codes
+
+- **Codes** → generate a batch, or
+- Counter sell-time flow in the dashboard
+
+Codes are **8 alphanumeric characters** (e.g. `AB12CD34`). Dashes are optional.
+
+### 5. Start a session on the client
+
+Enter the access code on the lock screen → session overlay shows the timer.
+
+### 6. Monitor live
+
+- **Dashboard** home — PC floor map updates via WebSocket
+- Pause / extend / force logout from **PCs** or **Sessions**
+
+---
+
+## Client commands
+
+| Command | Purpose |
+|---------|---------|
+| `client\start_client.bat` | Launch without terminal |
+| `python client\main.py` | Debug (console) |
+| `python client\main.py --dev` | Relaxed kiosk (can exit with Esc) |
+| `client\reset_client.bat` | Factory reset |
+| `python client\main.py --reset --yes` | Reset without prompts |
+
+**Exit setup wizard:** use **Exit Setup** — setup is not kiosk-locked.
+
+---
+
+## Testing security
+
+| Test | How |
+|------|-----|
+| Wrong access code | Enter invalid code 3× → alarm screen |
+| Recovery combo | Hold Alt + keys shown on alarm (from setup step 3) |
+| Staff master code | **Staff** button on lock screen |
+| Production lock | Default mode blocks Alt+F4 / Esc until staff unlock |
+
+---
+
+## Testing offline behavior
+
+1. Start a session on the client
+2. Stop the local server
+3. Client locks after heartbeat grace period
+4. Events queue to `client/offline_queue.json`
+5. Restart server — client reconnects on next heartbeat
+
+---
+
+## Testing the unified installer (optional)
+
+```bat
+scripts\build_installer.bat
+```
+
+Output: `deploy\installer\installer_output\CyberCafe Setup.exe`
+
+Preview UI without full build (after payloads staged):
+
+```bat
+scripts\start_installer.bat
+```
+
+See [deploy/DISTRIBUTION.md](../deploy/DISTRIBUTION.md).
+
+---
 
 ## Troubleshooting
 
-### Database Connection Error
-```
-Error: Connection refused
-```
-Solution: Ensure PostgreSQL is running on port 5432
+### Database connection refused
 
-### Port Already in Use
-```
-Error: [Errno 10048] Address already in use
-```
-Solution: Change PORT in .env or stop the other service
+PostgreSQL is not running or `DATABASE_URL` is wrong. Start the service and verify credentials.
 
-### Prisma Not Found
-```
-Error: prisma: command not found
-```
-Solution: `pip install prisma && prisma generate`
+### Port already in use (8000 or 7842)
 
-### Client Won't Start
-```
-Error: No module named 'PyQt6'
-```
-Solution: `pip install PyQt6`
+Change `PORT` in `.env` or stop the conflicting process:
 
-## Testing Offline Mode
-
-1. Stop the local server
-2. Client should continue working (if previously authenticated)
-3. Actions are queued in `offline_queue.json`
-4. Restart server - queue syncs automatically
-
-## Testing Real-time Updates
-
-1. Open dashboard in browser
-2. Start a session via client
-3. Dashboard updates automatically via WebSocket
-
-## Running as Windows Service
-
-```bash
-# Run as administrator
-install_services.bat
+```bat
+netstat -ano | findstr :8000
 ```
 
-This installs:
-- CyberCafeWatchdog (client monitor)
-- CyberCafeServer (server monitor)
+### `prisma: command not found`
 
-## Performance Testing
-
-For 50+ concurrent PCs:
-
-```bash
-# Increase UVICORN workers
-uvicorn local_server.app.main:app --workers 4
-
-# Or use gunicorn
-gunicorn local_server.app.main:app -w 4 -k uvicorn.workers.UvicornWorker
+```bat
+python scripts\prisma_generate.py
 ```
+
+### `No module named 'PyQt6'`
+
+```bat
+pip install PyQt6
+```
+
+### Client can't reach server from another PC
+
+Use the server's **LAN IP**, not `localhost`:
+
+```
+http://192.168.x.x:8000
+```
+
+Ensure Windows Firewall allows inbound TCP on port 8000.
+
+### Access code always invalid
+
+- Confirm code exists and is active in dashboard **Codes**
+- Use the exact 8-character code (case insensitive)
+- Check client `pc_id` matches registration
+
+### Dashboard shows old branding
+
+Hard-refresh the browser. Client branding updates on heartbeat config push.
+
+### `start_test.bat` fails at setup
+
+Run `python setup.py` alone and read the error. Common fixes: PostgreSQL down, missing npm, wrong `DATABASE_URL`.
+
+---
+
+## Performance notes
+
+For many concurrent clients on one server machine, run multiple Uvicorn workers:
+
+```bat
+uvicorn local_server.app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+Tune `heartbeat_interval` in client config (default 5–30s) to balance load vs. responsiveness.

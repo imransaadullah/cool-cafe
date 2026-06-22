@@ -2,6 +2,8 @@
 
 Ship **one graphical installer** to customers. They choose their role during setup.
 
+> **See also:** [README](../README.md) for architecture overview and [Local testing](../docs/LOCAL_TESTING.md) for dev setup.
+
 ## Build the installer (on your dev machine)
 
 Requirements:

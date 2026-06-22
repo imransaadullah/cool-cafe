@@ -171,8 +171,13 @@ async def _seed_initial_data(config: SetupConfig, log: LogFn) -> Tuple[bool, str
     from prisma import Prisma
     from shared.utils.auth import get_password_hash
 
+    from shared.branding import default_branding_seed
+
     db = Prisma()
     await db.connect()
+
+    seed_branding = default_branding_seed()
+    seed_branding["display_name"] = config.cafe_name or seed_branding["display_name"]
 
     branch = await db.branch.find_first(where={"name": config.branch_name})
     if not branch:
@@ -183,15 +188,7 @@ async def _seed_initial_data(config: SetupConfig, log: LogFn) -> Tuple[bool, str
                 "phone": config.branch_phone or None,
                 "config": {
                     "cafe_name": config.cafe_name,
-                    "branding": {
-                        "display_name": config.cafe_name,
-                        "accent_color": "#e94560",
-                        "background": {
-                            "type": "color",
-                            "color": "#1a1a2e",
-                            "overlay_opacity": 0.45,
-                        },
-                    },
+                    "branding": seed_branding,
                 },
             }
         )

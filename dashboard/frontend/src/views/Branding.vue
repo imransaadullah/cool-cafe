@@ -11,7 +11,7 @@
 
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-2">Display name</label>
-          <input v-model="form.display_name" type="text" class="input" placeholder="NetZone Gaming" />
+          <input v-model="form.display_name" type="text" class="input" placeholder="NISS E-LIBRARY" />
           <p class="text-xs text-gray-500 mt-1">Shown on client lock screens instead of a generic title.</p>
         </div>
 
@@ -166,7 +166,7 @@
           class="max-h-20 mb-4 object-contain"
         />
         <h3 class="text-3xl font-bold" :style="{ color: form.accent_color }">
-          {{ form.display_name || 'Cyber Cafe' }}
+          {{ form.display_name || 'NISS E-LIBRARY' }}
         </h3>
         <p v-if="form.tagline" class="text-gray-300 mt-2">{{ form.tagline }}</p>
         <p class="text-gray-400 mt-6 text-sm">Enter Access Code</p>
@@ -185,10 +185,10 @@ const saving = ref(false)
 const form = reactive({
   display_name: '',
   tagline: '',
-  accent_color: '#e94560',
+  accent_color: '#1B7F3A',
   background: {
     type: 'color',
-    color: '#1a1a2e',
+    color: '#0f1a14',
     overlay_opacity: 0.45,
   },
 })
@@ -197,9 +197,9 @@ const syncForm = () => {
   const b = brandingStore.branding
   form.display_name = b.display_name || ''
   form.tagline = b.tagline || ''
-  form.accent_color = b.accent_color || '#e94560'
+  form.accent_color = b.accent_color || '#1B7F3A'
   form.background.type = b.background?.type || 'color'
-  form.background.color = b.background?.color || '#1a1a2e'
+  form.background.color = b.background?.color || '#0f1a14'
   form.background.overlay_opacity = b.background?.overlay_opacity ?? 0.45
 }
 
@@ -219,7 +219,7 @@ const previewStyle = computed(() => {
     }
   }
   return {
-    backgroundColor: bg.color || '#1a1a2e',
+    backgroundColor: bg.color || '#0f1a14',
     color: '#fff',
   }
 })

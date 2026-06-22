@@ -10,7 +10,12 @@ from fastapi.responses import FileResponse
 from prisma import Prisma
 from pydantic import BaseModel, Field
 
-from shared.branding import build_public_branding, merge_branding
+from shared.branding import (
+    DEFAULT_BACKGROUND_COLOR,
+    build_public_branding,
+    default_logo_file_path,
+    merge_branding,
+)
 from shared.config import settings
 from shared.database import get_db
 
@@ -27,7 +32,7 @@ router = APIRouter()
 
 class BrandingBackgroundUpdate(BaseModel):
     type: Literal["color", "image"] = "color"
-    color: Optional[str] = "#1a1a2e"
+    color: Optional[str] = DEFAULT_BACKGROUND_COLOR
     overlay_opacity: Optional[float] = Field(default=0.45, ge=0.0, le=1.0)
 
 
@@ -56,6 +61,15 @@ async def _save_branding_config(branch_id: int, branding: dict, db: Prisma):
     if branding.get("display_name"):
         config["cafe_name"] = branding["display_name"]
     await db.branch.update(where={"id": branch_id}, data={"config": config})
+
+
+@router.get("/branding/default/logo.png")
+async def serve_default_logo():
+    """Bundled platform default logo (NISS E-LIBRARY)."""
+    path = default_logo_file_path()
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Default logo not found")
+    return FileResponse(path, media_type="image/png")
 
 
 @router.get("/public/branding")

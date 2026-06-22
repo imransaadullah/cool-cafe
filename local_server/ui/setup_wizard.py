@@ -179,7 +179,7 @@ class ServerSetupWizard(QMainWindow):
         lay = QVBoxLayout(w)
         box, form = self._form_group("Café / Branch")
 
-        self.cafe_name = QLineEdit("My Cyber Café")
+        self.cafe_name = QLineEdit("NISS E-LIBRARY")
         self.branch_name = QLineEdit("Main Branch")
         self.branch_address = QLineEdit()
         self.branch_address.setPlaceholderText("Optional street address")
@@ -288,7 +288,7 @@ class ServerSetupWizard(QMainWindow):
 
     def _build_config(self) -> SetupConfig:
         return SetupConfig(
-            cafe_name=self.cafe_name.text().strip() or "My Cyber Café",
+            cafe_name=self.cafe_name.text().strip() or "NISS E-LIBRARY",
             branch_name=self.branch_name.text().strip() or "Main Branch",
             branch_address=self.branch_address.text().strip(),
             branch_phone=self.branch_phone.text().strip(),

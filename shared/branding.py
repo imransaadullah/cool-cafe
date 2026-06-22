@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict, Optional
 
+DEFAULT_DISPLAY_NAME = "NISS E-LIBRARY"
+DEFAULT_TAGLINE = ""
+DEFAULT_ACCENT_COLOR = "#1B7F3A"
+DEFAULT_BACKGROUND_COLOR = "#0f1a14"
+DEFAULT_LOGO_API_PATH = "/api/branches/branding/default/logo.png"
+
 DEFAULT_BRANDING: Dict[str, Any] = {
-    "display_name": "Cyber Cafe",
-    "tagline": "",
-    "accent_color": "#e94560",
+    "display_name": DEFAULT_DISPLAY_NAME,
+    "tagline": DEFAULT_TAGLINE,
+    "accent_color": DEFAULT_ACCENT_COLOR,
     "background": {
         "type": "color",
-        "color": "#1a1a2e",
+        "color": DEFAULT_BACKGROUND_COLOR,
         "image_path": None,
         "overlay_opacity": 0.45,
     },
@@ -25,6 +32,32 @@ ASSET_FILES = {
     "logo_client": "logo_client.png",
     "background": "background.jpg",
 }
+
+
+def default_logo_file_path() -> Path:
+    """Bundled NISS logo shipped with the platform."""
+    return Path(__file__).resolve().parent / "assets" / "branding" / "niss_logo.png"
+
+
+def default_branding_seed() -> Dict[str, Any]:
+    """Branding dict for new branch setup (custom uploads still override later)."""
+    return deepcopy(DEFAULT_BRANDING)
+
+
+def resolve_logo_url(branding: Dict[str, Any]) -> str:
+    return (
+        branding.get("logo_path")
+        or branding.get("logo_client_path")
+        or DEFAULT_LOGO_API_PATH
+    )
+
+
+def resolve_logo_client_url(branding: Dict[str, Any]) -> str:
+    return (
+        branding.get("logo_client_path")
+        or branding.get("logo_path")
+        or DEFAULT_LOGO_API_PATH
+    )
 
 
 def _merge_dict(base: dict, override: dict) -> dict:
@@ -79,21 +112,18 @@ def build_client_branding(branch_config: Any, branch_id: int) -> Dict[str, Any]:
     bg_type = background.get("type") or "color"
 
     payload: Dict[str, Any] = {
-        "display_name": branding.get("display_name", DEFAULT_BRANDING["display_name"]),
+        "display_name": branding.get("display_name", DEFAULT_DISPLAY_NAME),
         "tagline": branding.get("tagline") or "",
-        "accent_color": branding.get("accent_color") or DEFAULT_BRANDING["accent_color"],
+        "accent_color": branding.get("accent_color") or DEFAULT_ACCENT_COLOR,
         "background": {
             "type": bg_type,
-            "color": background.get("color") or DEFAULT_BRANDING["background"]["color"],
+            "color": background.get("color") or DEFAULT_BACKGROUND_COLOR,
             "overlay_opacity": background.get(
                 "overlay_opacity", DEFAULT_BRANDING["background"]["overlay_opacity"]
             ),
         },
+        "logo_path": resolve_logo_client_url(branding),
     }
-
-    logo_path = branding.get("logo_client_path") or branding.get("logo_path")
-    if logo_path:
-        payload["logo_path"] = logo_path
 
     bg = branding.get("background") or {}
     if (bg.get("type") or "color") == "image" and bg.get("image_path"):
@@ -112,15 +142,12 @@ def build_public_branding(branch_config: Any, branch_id: int) -> Dict[str, Any]:
     else:
         background["image_url"] = None
 
-    logo_url = branding.get("logo_path")
-    logo_client_url = branding.get("logo_client_path") or logo_url
-
     return {
-        "display_name": branding.get("display_name", DEFAULT_BRANDING["display_name"]),
+        "display_name": branding.get("display_name", DEFAULT_DISPLAY_NAME),
         "tagline": branding.get("tagline") or "",
-        "accent_color": branding.get("accent_color") or DEFAULT_BRANDING["accent_color"],
+        "accent_color": branding.get("accent_color") or DEFAULT_ACCENT_COLOR,
         "background": background,
-        "logo_url": logo_url,
-        "logo_client_url": logo_client_url,
+        "logo_url": resolve_logo_url(branding),
+        "logo_client_url": resolve_logo_client_url(branding),
         "updated_at": branding.get("updated_at"),
     }

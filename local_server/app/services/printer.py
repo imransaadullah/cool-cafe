@@ -2,6 +2,8 @@ from typing import List, Dict, Any
 from datetime import datetime
 import os
 
+from shared.branding import DEFAULT_DISPLAY_NAME
+
 
 class CodePrinter:
     """Service for generating printable code sheets."""
@@ -100,7 +102,7 @@ class CodePrinter:
 </head>
 <body>
     <div class="header">
-        <h1>CYBER CAFE</h1>
+        <h1>{DEFAULT_DISPLAY_NAME}</h1>
         <p>Access Code Batch #{batch_id}</p>
         <p>Duration: {duration} minutes | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
     </div>
@@ -145,7 +147,7 @@ class CodePrinter:
         
         text = f"""
 ===============================================
-           CYBER CAFE ACCESS CODES
+           {DEFAULT_DISPLAY_NAME.upper()} ACCESS CODES
 ===============================================
 Batch ID: #{batch_id}
 Duration: {duration} minutes

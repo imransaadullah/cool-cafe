@@ -2,18 +2,20 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/services/api'
 
+const DEFAULT_LOGO = '/api/branches/branding/default/logo.png'
+
 const DEFAULTS = {
-  display_name: 'Cyber Cafe',
+  display_name: 'NISS E-LIBRARY',
   tagline: '',
-  accent_color: '#e94560',
+  accent_color: '#1B7F3A',
   background: {
     type: 'color',
-    color: '#1a1a2e',
+    color: '#0f1a14',
     overlay_opacity: 0.45,
     image_url: null,
   },
-  logo_url: null,
-  logo_client_url: null,
+  logo_url: DEFAULT_LOGO,
+  logo_client_url: DEFAULT_LOGO,
 }
 
 export const useBrandingStore = defineStore('branding', () => {

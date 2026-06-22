@@ -77,7 +77,7 @@ class LockScreen(QMainWindow):
         self.security.extend_session.connect(self._admin_extend_session)
 
     def setup_ui(self):
-        self.setWindowTitle("Cyber Cafe")
+        self.setWindowTitle("NISS E-LIBRARY")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -86,7 +86,7 @@ class LockScreen(QMainWindow):
         central_widget = QWidget()
         central_widget.setObjectName("lockScreenCentral")
         central_widget.setStyleSheet(
-            "#lockScreenCentral { background-color: #1a1a2e; }"
+            "#lockScreenCentral { background-color: #0f1a14; }"
         )
         self.central_widget = central_widget
         self.setCentralWidget(central_widget)
@@ -103,10 +103,10 @@ class LockScreen(QMainWindow):
         self.logo_label.hide()
         main_layout.addWidget(self.logo_label)
 
-        self.title_label = QLabel("CYBER CAFE")
+        self.title_label = QLabel("NISS E-LIBRARY")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setFont(QFont("Arial", 48, QFont.Weight.Bold))
-        self.title_label.setStyleSheet("color: #e94560; background: transparent;")
+        self.title_label.setStyleSheet("color: #1B7F3A; background: transparent;")
         main_layout.addWidget(self.title_label)
 
         self.tagline_label = QLabel("")
@@ -139,15 +139,23 @@ class LockScreen(QMainWindow):
             if response.status_code == 200:
                 self.apply_branding(response.json())
         except Exception:
-            pass
+            self.apply_branding({
+                "display_name": "NISS E-LIBRARY",
+                "accent_color": "#1B7F3A",
+                "background": {"type": "color", "color": "#0f1a14"},
+                "logo_path": (
+                    f"{client_config.get_server_url().rstrip('/')}"
+                    "/api/branches/branding/default/logo.png"
+                ),
+            })
 
     def apply_branding(self, branding: dict):
         if not branding:
             return
         self._current_branding = branding
-        display_name = branding.get("display_name") or "Cyber Cafe"
+        display_name = branding.get("display_name") or "NISS E-LIBRARY"
         self.setWindowTitle(display_name)
-        self.title_label.setText(display_name.upper())
+        self.title_label.setText(display_name)
 
         accent_widgets = [self.title_label]
         if hasattr(self, "enter_code_label"):

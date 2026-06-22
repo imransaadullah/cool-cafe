@@ -235,6 +235,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '@/services/api'
+import { useBrandingStore } from '@/stores/branding'
+
+const brandingStore = useBrandingStore()
 
 const batches = ref([])
 const batchCodes = ref([])
@@ -293,7 +296,7 @@ const printSoldCode = () => {
     <style>body{font-family:sans-serif;text-align:center;padding:40px}
     .code{font-size:28px;font-weight:bold;letter-spacing:2px;margin:16px 0}
     </style></head><body>
-    <h2>Cyber Café Time Ticket</h2>
+    <h2>${brandingStore.branding.display_name} Time Ticket</h2>
     <div class="code">${c.code}</div>
     <p>${c.duration_minutes} minutes · ₦${c.amount}</p>
     <p style="font-size:12px;color:#666">Enter this code at any PC</p>

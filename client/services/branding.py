@@ -15,6 +15,11 @@ from PyQt6.QtWidgets import QLabel, QWidget
 
 from services.config_manager import client_config
 from services.paths import app_path
+from shared.branding import (
+    DEFAULT_ACCENT_COLOR,
+    DEFAULT_BACKGROUND_COLOR,
+    DEFAULT_DISPLAY_NAME,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +75,12 @@ def apply_lock_screen_branding(
         return
 
     server_url = client_config.get_server_url()
-    display_name = branding.get("display_name") or "Cyber Cafe"
+    display_name = branding.get("display_name") or DEFAULT_DISPLAY_NAME
     tagline = branding.get("tagline") or ""
-    accent = branding.get("accent_color") or "#e94560"
+    accent = branding.get("accent_color") or DEFAULT_ACCENT_COLOR
     background = branding.get("background") or {}
     bg_type = background.get("type") or "color"
-    bg_color = background.get("color") or "#1a1a2e"
+    bg_color = background.get("color") or DEFAULT_BACKGROUND_COLOR
     overlay = float(background.get("overlay_opacity") or 0.45)
 
     if window_title_label is not None:

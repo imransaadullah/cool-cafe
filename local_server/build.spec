@@ -69,6 +69,7 @@ common_hidden = [
     'local_server.app.routes.webhooks',
     'local_server.app.routes.master_codes',
     'local_server.app.routes.branches',
+    'local_server.app.routes.branding',
     'local_server.app.routes.security',
     'local_server.app.services.payment',
     'local_server.app.services.printer',

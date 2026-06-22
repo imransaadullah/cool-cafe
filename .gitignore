@@ -49,8 +49,14 @@ Thumbs.db
 
 # Build
 *.spec
+!client/build.spec
+!local_server/build.spec
+!global_server/build.spec
+!installer/build.spec
 installer_output/
 releases/
+deploy/installer/payload/
+local_server/data/branding/
 
 # Client/Server build
 client/dist/

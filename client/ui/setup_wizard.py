@@ -10,6 +10,7 @@ import requests
 import secrets
 import string
 from PyQt6.QtWidgets import (
+    QApplication,
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QStackedWidget,
     QCheckBox, QSpinBox, QColorDialog, QMessageBox,
@@ -18,7 +19,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
 from services.config_manager import client_config
-from services.kiosk_guard import should_block_window_close
 
 
 def get_local_ip():
@@ -121,6 +121,16 @@ class SetupWizard(QMainWindow):
         self.prev_btn.clicked.connect(self.prev_step)
         self.prev_btn.setEnabled(False)
         nav_layout.addWidget(self.prev_btn)
+        
+        nav_layout.addStretch()
+
+        self.exit_btn = QPushButton("Exit Setup")
+        self.exit_btn.setStyleSheet(
+            "QPushButton { background-color: #4a4a5e; }"
+            "QPushButton:hover { background-color: #5a5a6e; }"
+        )
+        self.exit_btn.clicked.connect(self.exit_setup)
+        nav_layout.addWidget(self.exit_btn)
         
         self.next_btn = QPushButton("Next")
         self.next_btn.clicked.connect(self.next_step)
@@ -460,11 +470,42 @@ class SetupWizard(QMainWindow):
         if self.lock_screen_callback:
             self.lock_screen_callback()
 
+    def exit_setup(self):
+        """Leave setup without finishing — allowed for staff during installation."""
+        if self._confirm_exit():
+            self._quit_application()
+
+    def _confirm_exit(self) -> bool:
+        reply = QMessageBox.question(
+            self,
+            "Exit Setup",
+            "Exit setup without finishing?\n\n"
+            "Any unsaved steps will be lost. You can run the client again later to complete setup.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _quit_application(self) -> None:
+        self._allow_close = True
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
     def closeEvent(self, event):
-        if not self._allow_close and should_block_window_close():
-            event.ignore()
+        # Setup is staff/installation flow — never apply production kiosk close lock.
+        if self._allow_close:
+            super().closeEvent(event)
             return
-        super().closeEvent(event)
+
+        if self._confirm_exit():
+            self._allow_close = True
+            app = QApplication.instance()
+            if app is not None:
+                app.quit()
+            event.accept()
+        else:
+            event.ignore()
 
 
 def check_first_run() -> bool:

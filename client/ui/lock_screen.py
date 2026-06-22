@@ -22,6 +22,9 @@ from services.config_manager import client_config
 from services.security_controller import SecurityController
 from services.master_code import MasterCodeValidator
 from services.kiosk_guard import should_block_quit_shortcut, should_block_window_close
+from services.recovery_combo import configured_recovery_combo, recovery_combo_matches
+from services.alarm import alarm_service
+from services.branding import apply_lock_screen_branding
 from ui.session_overlay import SessionOverlay
 
 
@@ -36,8 +39,11 @@ class LockScreen(QMainWindow):
         self.security = SecurityController(self)
         self.master_code_validator = MasterCodeValidator()
         self.current_pc_id = client_config.get_pc_id()
+        self._pressed_keys: set[int] = set()
+        self._recovery_combo = configured_recovery_combo()
         self._offline_grace_ticks = 0
         self._production_mode = client_config.is_production_mode()
+        self._current_branding: dict = {}
 
         self.setup_ui()
         self.setup_timer()
@@ -71,7 +77,7 @@ class LockScreen(QMainWindow):
         self.security.extend_session.connect(self._admin_extend_session)
 
     def setup_ui(self):
-        self.setWindowTitle("CyberCafe")
+        self.setWindowTitle("Cyber Cafe")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -82,16 +88,33 @@ class LockScreen(QMainWindow):
         central_widget.setStyleSheet(
             "#lockScreenCentral { background-color: #1a1a2e; }"
         )
+        self.central_widget = central_widget
         self.setCentralWidget(central_widget)
+
+        self.background_label = QLabel(central_widget)
+        self.background_label.setScaledContents(True)
+        self.background_label.hide()
 
         main_layout = QVBoxLayout(central_widget)
         main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        title_label = QLabel("CYBER CAFE")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_label.setFont(QFont("Arial", 48, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: #e94560;")
-        main_layout.addWidget(title_label)
+        self.logo_label = QLabel()
+        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_label.hide()
+        main_layout.addWidget(self.logo_label)
+
+        self.title_label = QLabel("CYBER CAFE")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setFont(QFont("Arial", 48, QFont.Weight.Bold))
+        self.title_label.setStyleSheet("color: #e94560; background: transparent;")
+        main_layout.addWidget(self.title_label)
+
+        self.tagline_label = QLabel("")
+        self.tagline_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.tagline_label.setFont(QFont("Arial", 14))
+        self.tagline_label.setStyleSheet("color: #95afc0; background: transparent;")
+        self.tagline_label.hide()
+        main_layout.addWidget(self.tagline_label)
 
         self.stack = QStackedWidget()
         main_layout.addWidget(self.stack)
@@ -101,6 +124,48 @@ class LockScreen(QMainWindow):
 
         self.stack.setCurrentIndex(0)
         self._apply_production_ui()
+        self._fetch_initial_branding()
+
+    def _fetch_initial_branding(self):
+        try:
+            import requests
+
+            branch_id = client_config.get_branch_id()
+            server_url = client_config.get_server_url().rstrip("/")
+            response = requests.get(
+                f"{server_url}/api/branches/{branch_id}/branding",
+                timeout=8,
+            )
+            if response.status_code == 200:
+                self.apply_branding(response.json())
+        except Exception:
+            pass
+
+    def apply_branding(self, branding: dict):
+        if not branding:
+            return
+        self._current_branding = branding
+        display_name = branding.get("display_name") or "Cyber Cafe"
+        self.setWindowTitle(display_name)
+        self.title_label.setText(display_name.upper())
+
+        accent_widgets = [self.title_label]
+        if hasattr(self, "enter_code_label"):
+            accent_widgets.append(self.enter_code_label)
+
+        apply_lock_screen_branding(
+            branding,
+            logo_label=self.logo_label,
+            tagline_label=self.tagline_label,
+            central_widget=self.central_widget,
+            background_label=self.background_label,
+            accent_widgets=accent_widgets,
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.background_label.isVisible():
+            self.background_label.setGeometry(self.central_widget.rect())
 
     def _apply_production_ui(self):
         self._production_mode = client_config.is_production_mode()
@@ -130,8 +195,8 @@ class LockScreen(QMainWindow):
         layout.addWidget(self.enter_code_label)
 
         self.code_input = QLineEdit()
-        self.code_input.setPlaceholderText("XXXX-XXXX-XXXX")
-        self.code_input.setMaxLength(20)
+        self.code_input.setPlaceholderText("8-character code (e.g. AB12CD34)")
+        self.code_input.setMaxLength(14)
         self.code_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.code_input.setFont(QFont("Arial", 18))
         self.code_input.returnPressed.connect(self.on_code_submit)
@@ -250,6 +315,9 @@ class LockScreen(QMainWindow):
             self.offline_manager.queue_action(
                 "code_attempt", {"code": code, "pc_id": self.current_pc_id}
             )
+            if client_config.get("security.alarm_enabled", True):
+                if alarm_service.increment_wrong_attempts():
+                    self.security._trigger_alarm("Too many wrong access codes")
 
     def _on_session_started(self):
         if self.heartbeat_thread:
@@ -331,6 +399,7 @@ class LockScreen(QMainWindow):
         self.heartbeat_thread.ban_signal.connect(self.on_banned)
         self.heartbeat_thread.config_update.connect(self._on_config_update)
         self.heartbeat_thread.command_signal.connect(self.security.handle_commands)
+        self.heartbeat_thread.alarm_signal.connect(self._on_server_alarm)
         self.heartbeat_thread.start()
 
     def on_session_heartbeat(self, data: dict):
@@ -350,7 +419,28 @@ class LockScreen(QMainWindow):
 
     def _on_config_update(self, config: dict):
         self.security.apply_server_config(config)
+        branding = config.get("branding")
+        if branding:
+            self.apply_branding(branding)
+        self._recovery_combo = configured_recovery_combo()
         self._apply_production_ui()
+
+    def _on_server_alarm(self, data: dict):
+        if not client_config.get("security.alarm_enabled", True):
+            return
+        if not alarm_service.is_alarm_active():
+            self.security._trigger_alarm(data.get("reason", "server_reported"))
+
+    def _unlock_via_recovery_combo(self):
+        client_config.unlock_staff_maintenance()
+        self._apply_production_ui()
+        if alarm_service.is_alarm_active() and alarm_service.alarm_screen:
+            alarm_service.alarm_screen._dismiss_alarm()
+        QMessageBox.information(
+            self,
+            "Recovery",
+            "Recovery combination accepted. Staff maintenance enabled.",
+        )
 
     def on_banned(self):
         QMessageBox.warning(
@@ -406,6 +496,7 @@ class LockScreen(QMainWindow):
 
         layout = QFormLayout(dialog)
         code_input = QLineEdit()
+        code_input.setPlaceholderText("XXXX-XXXX-XXXX or 12 characters")
         code_input.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addRow("Master code:", code_input)
 
@@ -509,6 +600,17 @@ class LockScreen(QMainWindow):
             QMessageBox.information(self, "Settings", "Settings saved!")
 
     def keyPressEvent(self, event):
+        self._pressed_keys.add(int(event.key()))
+
+        if (
+            not self.session_manager.is_active
+            and self._recovery_combo
+            and recovery_combo_matches(event, self._pressed_keys, self._recovery_combo)
+        ):
+            self._unlock_via_recovery_combo()
+            event.accept()
+            return
+
         if should_block_quit_shortcut(event):
             event.accept()
             return
@@ -520,7 +622,6 @@ class LockScreen(QMainWindow):
             self.close()
             return
         if event.key() in [
-            Qt.Key.Key_Alt,
             Qt.Key.Key_F4,
             Qt.Key.Key_Control,
             Qt.Key.Key_Delete,
@@ -528,6 +629,10 @@ class LockScreen(QMainWindow):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        self._pressed_keys.discard(int(event.key()))
+        super().keyReleaseEvent(event)
 
     def changeEvent(self, event):
         if (

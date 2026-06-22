@@ -56,6 +56,12 @@ const routes = [
     component: () => import('@/views/Settings.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/branding',
+    name: 'Branding',
+    component: () => import('@/views/Branding.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({

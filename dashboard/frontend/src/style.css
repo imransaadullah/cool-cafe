@@ -15,7 +15,8 @@ body {
 }
 
 .sidebar-link.active {
-  @apply bg-primary-600 text-white;
+  background-color: var(--brand-accent, #2563eb);
+  @apply text-white;
 }
 
 .card {
@@ -27,7 +28,12 @@ body {
 }
 
 .btn-primary {
-  @apply bg-primary-600 text-white hover:bg-primary-700;
+  @apply text-white;
+  background-color: var(--brand-accent, #2563eb);
+}
+
+.btn-primary:hover {
+  filter: brightness(0.92);
 }
 
 .btn-danger {

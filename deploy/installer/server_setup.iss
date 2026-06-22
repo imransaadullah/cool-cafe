@@ -1,11 +1,12 @@
 ; CyberCafe Server Installer Script
-; Using Inno Setup
+; Installs server manager (API + dashboard) with optional Windows service
 
 #define MyAppName "CyberCafe Server"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "CyberCafe"
 #define MyAppURL "https://cybercafe.com"
 #define MyAppExeName "CyberCafe Server.exe"
+#define MyServiceExeName "CyberCafeServerService.exe"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -30,13 +31,16 @@ PrivilegesRequired=admin
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked; OnlyBelowVersion: 6.1
-Name: "installservice"; Description: "Install as Windows Service"; GroupDescription: "Service:"; Flags: checkedonce
+Name: "installservice"; Description: "Install as Windows Service (auto-restart)"; GroupDescription: "Service:"; Flags: unchecked
+Name: "autostart"; Description: "Start server manager when Windows starts"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
-Source: "dist\CyberCafe Server\CyberCafe Server.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\CyberCafe Server\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\local_server\dist\CyberCafe Server\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\local_server\dist\CyberCafe Server\{#MyServiceExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\local_server\dist\CyberCafe Server\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\.env.example"; DestDir: "{app}"; DestName: ".env.example"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -45,38 +49,19 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "install"; StatusMsg: "Installing server service..."; Tasks: installservice; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "start"; StatusMsg: "Starting server service..."; Tasks: installservice; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch setup wizard"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "stop"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyServiceExeName}"; Parameters: "remove"; Flags: runhidden waituntilterminated
 
 [Registry]
-; Auto-start on boot
-Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "CyberCafeServer"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "CyberCafeServer"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart
 
 [Code]
-// Check if PostgreSQL is installed
-function IsPostgreSQLInstalled: Boolean;
-var
-  ResultCode: Integer;
-begin
-  Result := Exec('cmd', '/c pg_isready', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
-end;
-
-// Check if port is available
-function IsPortAvailable(Port: Integer): Boolean;
-var
-  ResultCode: Integer;
-begin
-  Result := Exec('cmd', '/c netstat -an | findstr ' + IntToStr(Port), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode <> 0);
-end;
-
 function InitializeSetup: Boolean;
 begin
   Result := True;
-  
-  if not IsPostgreSQLInstalled then
-  begin
-    if MsgBox('PostgreSQL is not installed. Would you like to download it?', mbConfirmation, MB_YESNO) = IDYES then
-    begin
-      Exec('cmd', '/c start https://www.postgresql.org/download/windows/', '', SW_SHOW, ewNoWait);
-    end;
-  end;
 end;

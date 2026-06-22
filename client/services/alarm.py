@@ -7,9 +7,14 @@ import sys
 import time
 import threading
 from PyQt6.QtWidgets import QMainWindow, QLabel, QVBoxLayout, QWidget
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QKeyEvent
 from services.config_manager import client_config
+from services.recovery_combo import (
+    configured_recovery_combo,
+    parse_recovery_combo,
+    recovery_combo_matches,
+)
 
 
 class AlarmScreen(QMainWindow):
@@ -19,9 +24,9 @@ class AlarmScreen(QMainWindow):
     
     def __init__(self, recovery_combo: list, alarm_color: str = "#FF0000"):
         super().__init__()
-        self.recovery_combo = recovery_combo
+        self.recovery_combo = parse_recovery_combo(recovery_combo)
         self.alarm_color = alarm_color
-        self.pressed_keys = set()
+        self.pressed_keys: set[int] = set()
         self.is_playing = True
         
         # Setup UI
@@ -66,7 +71,7 @@ class AlarmScreen(QMainWindow):
         layout.addWidget(instructions)
         
         # Recovery combo display
-        combo_text = " + ".join(["Alt"] + self.recovery_combo)
+        combo_text = " + ".join(["Alt"] + self.recovery_combo) if self.recovery_combo else "Alt + (not configured)"
         combo_label = QLabel(f"Recovery: {combo_text}")
         combo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         combo_label.setFont(QFont("Arial", 18))
@@ -75,57 +80,33 @@ class AlarmScreen(QMainWindow):
         
         # Block focus
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.grabKeyboard()
     
-    def keyPressEvent(self, event):
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.setFocus()
+        self.activateWindow()
+        self.grabKeyboard()
+    
+    def keyPressEvent(self, event: QKeyEvent):
         """Handle key press for recovery combo."""
-        key = event.key()
-        self.pressed_keys.add(key)
+        self.pressed_keys.add(int(event.key()))
         
-        # Check if recovery combo pressed
-        if self._check_recovery_combo():
+        if recovery_combo_matches(event, self.pressed_keys, self.recovery_combo):
             self._dismiss_alarm()
             return
         
-        # Block everything else
         event.accept()
     
-    def keyReleaseEvent(self, event):
+    def keyReleaseEvent(self, event: QKeyEvent):
         """Handle key release."""
-        self.pressed_keys.discard(event.key())
-    
-    def _check_recovery_combo(self) -> bool:
-        """Check if Alt + recovery keys pressed."""
-        # Check Alt key
-        if Qt.Key.Key_Alt not in self.pressed_keys:
-            return False
-        
-        # Check all recovery keys
-        key_map = {
-            "F1": Qt.Key.Key_F1, "F2": Qt.Key.Key_F2, "F3": Qt.Key.Key_F3,
-            "F4": Qt.Key.Key_F4, "F5": Qt.Key.Key_F5, "F6": Qt.Key.Key_F6,
-            "F7": Qt.Key.Key_F7, "F8": Qt.Key.Key_F8, "F9": Qt.Key.Key_F9,
-            "F10": Qt.Key.Key_F10, "F11": Qt.Key.Key_F11, "F12": Qt.Key.Key_F12,
-        }
-        
-        # Add letter keys
-        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-            key_map[letter] = getattr(Qt.Key, f"Key_{letter}")
-        
-        # Add number keys
-        for num in "0123456789":
-            key_map[num] = getattr(Qt.Key, f"Key_{num}")
-        
-        for key_name in self.recovery_combo:
-            if key_name not in key_map:
-                return False
-            if key_map[key_name] not in self.pressed_keys:
-                return False
-        
-        return True
+        self.pressed_keys.discard(int(event.key()))
+        event.accept()
     
     def _dismiss_alarm(self):
         """Dismiss the alarm."""
         self.is_playing = False
+        self.releaseKeyboard()
         self.alarm_dismissed.emit()
         self.close()
     
@@ -157,6 +138,7 @@ class AlarmScreen(QMainWindow):
         if self.is_playing:
             event.ignore()
         else:
+            self.releaseKeyboard()
             event.accept()
 
 
@@ -170,13 +152,12 @@ class AlarmService:
     
     def trigger_alarm(self, reason: str):
         """Trigger the alarm."""
-        # Get recovery combo
-        recovery_combo = client_config.get("security.recovery_combo", "F9+F10+F11").split("+")
-        
-        # Get alarm color
+        if self.alarm_screen is not None:
+            return True
+
+        recovery_combo = configured_recovery_combo() or parse_recovery_combo("F9+F10+F11")
         alarm_color = client_config.get("security.alarm_color", "#FF0000")
         
-        # Create and show alarm screen
         self.alarm_screen = AlarmScreen(recovery_combo, alarm_color)
         self.alarm_screen.alarm_dismissed.connect(self._on_alarm_dismissed)
         self.alarm_screen.showFullScreen()

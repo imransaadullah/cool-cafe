@@ -1,8 +1,14 @@
 <template>
   <div class="sidebar">
     <div class="p-4">
-      <h1 class="text-xl font-bold text-white">CyberCafe</h1>
-      <p class="text-xs text-gray-400">Management System</p>
+      <img
+        v-if="brandingStore.branding.logo_url"
+        :src="brandingStore.branding.logo_url"
+        :alt="brandingStore.branding.display_name"
+        class="h-10 max-w-[180px] object-contain mb-2"
+      />
+      <h1 class="text-xl font-bold text-white">{{ brandingStore.branding.display_name }}</h1>
+      <p class="text-xs text-gray-400">{{ brandingStore.branding.tagline || 'Management System' }}</p>
     </div>
     
     <nav class="mt-4">
@@ -30,11 +36,14 @@
 </template>
 
 <script setup>
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useBrandingStore } from '@/stores/branding'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const brandingStore = useBrandingStore()
 
 const menuItems = [
   { name: 'Dashboard', path: '/', icon: '📊' },
@@ -44,6 +53,7 @@ const menuItems = [
   { name: 'Security', path: '/security', icon: '🛡️' },
   { name: 'Reports', path: '/reports', icon: '📈' },
   { name: 'Branches', path: '/branches', icon: '🏢' },
+  { name: 'Branding', path: '/branding', icon: '🎨' },
   { name: 'Settings', path: '/settings', icon: '⚙️' },
 ]
 
@@ -51,4 +61,12 @@ const handleLogout = () => {
   authStore.logout()
   router.push('/login')
 }
+
+onMounted(async () => {
+  try {
+    await brandingStore.fetchBranch(1)
+  } catch (error) {
+    console.error(error)
+  }
+})
 </script>

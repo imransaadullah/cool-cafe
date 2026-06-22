@@ -11,6 +11,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 import secrets
 import string
+from shared.code_utils import normalize_master_code
 
 router = APIRouter()
 
@@ -97,8 +98,14 @@ async def validate_code(
     db: Prisma = Depends(get_db)
 ):
     """Validate a master code (called by client)."""
-    # Find the code
-    master_code = await db.mastercode.find_unique(where={"code": data.code})
+    code_value = normalize_master_code(data.code)
+    if not code_value:
+        return MasterCodeValidateResponse(
+            success=False,
+            message="Please enter a code",
+        )
+
+    master_code = await db.mastercode.find_unique(where={"code": code_value})
     
     if not master_code:
         return MasterCodeValidateResponse(

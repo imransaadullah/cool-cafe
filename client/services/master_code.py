@@ -8,6 +8,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from typing import Tuple, Optional
+from shared.code_utils import normalize_master_code
 from services.config_manager import client_config
 
 
@@ -43,6 +44,10 @@ class MasterCodeValidator:
         Returns:
             (success, message, duration_minutes)
         """
+        code = normalize_master_code(code.strip())
+        if not code:
+            return False, "Please enter a code", None
+
         # Try online validation first
         success, message, duration = self._validate_online(code)
         
@@ -93,7 +98,7 @@ class MasterCodeValidator:
         if not static_code:
             return False, "No static code configured", None
         
-        if code != static_code:
+        if code != normalize_master_code(static_code):
             return False, "Invalid code", None
         
         # Check if static code was already used
@@ -154,9 +159,11 @@ class MasterCodeValidator:
     
     def get_recovery_combo(self) -> list:
         """Get the recovery key combination."""
+        from services.recovery_combo import parse_recovery_combo
+
         combo_str = client_config.get("security.recovery_combo", "")
         if combo_str:
-            return combo_str.split("+")
+            return parse_recovery_combo(combo_str)
         return []
     
     def is_banned(self) -> bool:

@@ -36,18 +36,25 @@ class CyberCafeServerService(win32serviceutil.ServiceFramework):
         self.server_path = self._get_server_path()
     
     def _get_server_path(self) -> str:
-        """Get the path to the server executable."""
-        # Default installation path
-        default_path = r"C:\Program Files\CyberCafe\server\CyberCafe Server.exe"
-        if os.path.exists(default_path):
-            return default_path
-        
-        # Try relative path
-        relative_path = os.path.join(os.path.dirname(__file__), "..", "desktop_app.py")
-        if os.path.exists(relative_path):
-            return relative_path
-        
-        return default_path
+        """Get the path to the server manager executable."""
+        try:
+            app_dir = Path(__file__).resolve().parents[1]
+        except Exception:
+            app_dir = Path(r"C:\Program Files\CyberCafe Server")
+
+        packaged = app_dir / "CyberCafe Server.exe"
+        if packaged.exists():
+            return str(packaged)
+
+        default_path = Path(r"C:\Program Files\CyberCafe Server\CyberCafe Server.exe")
+        if default_path.exists():
+            return str(default_path)
+
+        relative = app_dir / "server_manager.py"
+        if relative.exists():
+            return str(relative)
+
+        return str(packaged)
     
     def SvcStop(self):
         """Stop the service."""

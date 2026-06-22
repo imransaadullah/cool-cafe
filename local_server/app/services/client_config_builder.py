@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from prisma import Prisma
 
 from shared.app_policy import merge_app_policy
+from shared.branding import build_client_branding
 from shared.pc_config import parse_pc_config
 
 
@@ -51,6 +52,7 @@ async def build_client_config(db: Prisma, pc) -> Dict[str, Any]:
     return {
         "client_mode": client_mode,
         "app_policy": app_policy,
+        "branding": build_client_branding(branch_config, pc.branchId),
         "filtering": {
             "dns_blocking": True,
             "process_blocking": True,

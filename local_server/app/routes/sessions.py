@@ -11,6 +11,10 @@ from pydantic import BaseModel
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta, timezone
 import uuid
+from shared.code_utils import normalize_ticket_code
+from ..services.audit import audit_logger
+
+MAX_WRONG_CODE_ATTEMPTS = 3
 
 
 def utcnow() -> datetime:
@@ -123,6 +127,32 @@ def _active_remaining_minutes(session) -> float:
     elapsed = (utcnow() - _ensure_utc(session.startTime)).total_seconds() / 60
     paused = session.totalPausedMinutes or 0
     return session.durationMinutes - elapsed + paused
+
+
+async def _record_wrong_code_attempt(pc, db: Prisma) -> int:
+    """Increment wrong-code counter; trigger alarm after threshold."""
+    attempt_count = (pc.wrongCodeAttempts or 0) + 1
+    update_data = {"wrongCodeAttempts": attempt_count}
+    if attempt_count >= MAX_WRONG_CODE_ATTEMPTS:
+        update_data["isAlarming"] = True
+        update_data["lastAlarmAt"] = utcnow()
+
+    await db.pc.update(where={"id": pc.id}, data=update_data)
+    await audit_logger.log_wrong_code_attempt(pc.id, pc.branchId, attempt_count)
+    if attempt_count >= MAX_WRONG_CODE_ATTEMPTS:
+        await audit_logger.log_alarm_triggered(
+            pc.id,
+            pc.branchId,
+            "too_many_wrong_access_codes",
+        )
+    return attempt_count
+
+
+async def _reset_wrong_code_attempts(db: Prisma, pc_id: int) -> None:
+    await db.pc.update(
+        where={"id": pc_id},
+        data={"wrongCodeAttempts": 0, "isAlarming": False},
+    )
 
 
 async def _get_session_for_code(code, db: Prisma):
@@ -326,6 +356,7 @@ async def _resume_paused_session(db: Prisma, session, pc_id: int) -> AuthRespons
         },
     )
     await _attach_session_to_pc(db, session, pc_id)
+    await _reset_wrong_code_attempts(db, pc_id)
 
     max_res, used, left = _login_quota_info(session)
     return AuthResponse(
@@ -370,6 +401,7 @@ async def _create_new_session(db: Prisma, code, pc_id: int) -> AuthResponse:
         where={"id": pc_id},
         data={"currentSessionId": session.id, "status": "in_use"},
     )
+    await _reset_wrong_code_attempts(db, pc_id)
 
     max_res = max_allowed_resumes(code.durationMinutes)
     return AuthResponse(
@@ -404,17 +436,24 @@ def _auth_success_from_active(session) -> AuthResponse:
 @router.post("/authenticate", response_model=AuthResponse)
 async def authenticate(request: AuthRequest, db: Prisma = Depends(get_db)):
     """Single entry point: start a new session or resume a paused ticket with code."""
-    code = await db.code.find_unique(where={"code": request.code})
-    if not code:
-        return AuthResponse(success=False, message="Invalid code")
-    if not code.isActive:
-        return AuthResponse(success=False, message="Code is inactive")
-    if code.expiresAt and _ensure_utc(code.expiresAt) < utcnow():
-        return AuthResponse(success=False, message="Code expired")
+    code_value = normalize_ticket_code(request.code)
+    if not code_value:
+        return AuthResponse(success=False, message="Please enter a code")
 
     pc = await db.pc.find_unique(where={"id": request.pc_id})
     if not pc:
         return AuthResponse(success=False, message="PC not found")
+
+    code = await db.code.find_unique(where={"code": code_value})
+    if not code:
+        await _record_wrong_code_attempt(pc, db)
+        return AuthResponse(success=False, message="Invalid code")
+    if not code.isActive:
+        await _record_wrong_code_attempt(pc, db)
+        return AuthResponse(success=False, message="Code is inactive")
+    if code.expiresAt and _ensure_utc(code.expiresAt) < utcnow():
+        await _record_wrong_code_attempt(pc, db)
+        return AuthResponse(success=False, message="Code expired")
 
     session = await _get_session_for_code(code, db)
     conflict = await _resolve_pc_conflict(db, pc, code, session)
@@ -423,6 +462,7 @@ async def authenticate(request: AuthRequest, db: Prisma = Depends(get_db)):
 
     if not session:
         if code.isUsed:
+            await _record_wrong_code_attempt(pc, db)
             return AuthResponse(success=False, message="Ticket finished or invalid")
         return await _create_new_session(db, code, request.pc_id)
 
@@ -448,13 +488,15 @@ async def authenticate(request: AuthRequest, db: Prisma = Depends(get_db)):
 
     await _close_session(db, session, status="expired")
     await db.code.update(where={"id": code.id}, data={"activeSessionId": None})
+    await _record_wrong_code_attempt(pc, db)
     return AuthResponse(success=False, message="Ticket expired or finished")
 
 
 @router.post("/logout", response_model=LogoutResponse)
 async def logout(request: LogoutRequest, db: Prisma = Depends(get_db)):
     """Pause the ticket session and detach it from this PC."""
-    code = await db.code.find_unique(where={"code": request.code})
+    code_value = normalize_ticket_code(request.code)
+    code = await db.code.find_unique(where={"code": code_value})
     if not code:
         return LogoutResponse(success=False, message="Invalid code")
 
@@ -493,7 +535,8 @@ async def session_heartbeat(
     db: Prisma = Depends(get_db),
 ):
     """Authoritative session timer — client must lock when should_lock is true."""
-    code = await db.code.find_unique(where={"code": request.code})
+    code_value = normalize_ticket_code(request.code)
+    code = await db.code.find_unique(where={"code": code_value})
     if not code:
         return SessionHeartbeatResponse(status="locked", remaining_seconds=0, should_lock=True)
 

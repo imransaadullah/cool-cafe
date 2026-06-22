@@ -2,11 +2,12 @@ from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from shared.config import settings
 from shared.database import db
-from .routes import auth, pcs, sessions, codes, dashboard, filter_rules, payments, content_filter, webhooks, master_codes, branches, security
+from .routes import auth, pcs, sessions, codes, dashboard, filter_rules, payments, content_filter, webhooks, master_codes, branches, security, branding
 from .websocket import websocket_endpoint, manager
 from .middleware import ErrorHandlerMiddleware, RequestLoggingMiddleware, AdminAuthMiddleware
 from .services.sync_worker import start_sync_worker, stop_sync_worker
 from .services.audit import audit_logger
+from .dashboard_static import mount_dashboard
 import sys
 import os
 import logging
@@ -55,6 +56,7 @@ app.include_router(content_filter.router, prefix="/api/content-filter", tags=["C
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(master_codes.router, prefix="/api/master-codes", tags=["Master Codes"])
 app.include_router(branches.router, prefix="/api/branches", tags=["Branches"])
+app.include_router(branding.router, prefix="/api/branches", tags=["Branding"])
 app.include_router(security.router, prefix="/api/security", tags=["Security"])
 
 
@@ -75,15 +77,6 @@ async def shutdown_event():
     logger.info("Database disconnected")
 
 
-@app.get("/")
-async def root():
-    return {
-        "app": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "mode": settings.DEPLOYMENT_MODE,
-    }
-
-
 @app.get("/api/health")
 async def health():
     return {"status": "healthy"}
@@ -92,3 +85,15 @@ async def health():
 @app.websocket("/ws")
 async def websocket_route(websocket: WebSocket):
     await websocket_endpoint(websocket)
+
+
+if not mount_dashboard(app):
+
+    @app.get("/")
+    async def root():
+        return {
+            "app": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "mode": settings.DEPLOYMENT_MODE,
+            "dashboard": "Build dashboard/frontend (npm run build) or run npm run dev on port 7842",
+        }

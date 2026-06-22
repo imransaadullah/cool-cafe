@@ -71,7 +71,37 @@ prisma db push
 python scripts/create_admin.py
 ```
 
+### First-time server installation
+
+When you launch **CyberCafe Server** for the first time (or run with `--setup`), the **installation wizard** runs automatically:
+
+1. **PostgreSQL** — host, port, credentials (creates `cybercafe` DB if missing)
+2. **Café / branch** — names and optional address
+3. **Admin account** — username and password for the dashboard
+4. **Network** — server port and LAN URL shown for client PCs
+5. **Install** — writes `.env`, applies schema, creates branch + admin
+
+After setup, the server manager opens and can start services + dashboard.
+
+Re-run setup anytime: **Settings → Run Setup Wizard** (stop services first), or:
+
+```bash
+cd local_server
+python server_manager.py --setup
+```
+
 ### 5. Start Services
+
+**Recommended — Server Manager (API + dashboard in one app):**
+
+```bash
+scripts\start_server_manager.bat
+# or: cd local_server && python server_manager.py
+```
+
+Opens a control window that starts the API, serves the built dashboard at http://localhost:8000/, and opens your browser. Use **Start** / **Stop** or the system tray.
+
+**Development — separate terminals:**
 
 Open **3 terminal windows**:
 
@@ -98,8 +128,9 @@ python main.py
 | Service | URL | Description |
 |---------|-----|-------------|
 | Local Server API | http://localhost:8000 | FastAPI backend |
-| API Docs | http://localhost:8000/docs | Swagger UI |
-| Dashboard | http://localhost:7842 | Vue.js admin panel |
+| API Docs | http://localhost:8000/api/docs | Swagger UI |
+| Dashboard (dev) | http://localhost:7842 | Vue dev server (`npm run dev`) |
+| Dashboard (manager) | http://localhost:8000 | Bundled with server manager / installer |
 | Client | Desktop app | PyQt6 lock screen |
 
 ## Default Credentials

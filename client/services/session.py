@@ -1,5 +1,8 @@
-import requests
 from typing import Optional, Tuple
+
+import requests
+
+from shared.code_utils import normalize_ticket_code
 from services.config_manager import client_config
 
 
@@ -14,6 +17,9 @@ class SessionManager:
         self.remaining_seconds = 0.0
 
     def authenticate(self, code: str, pc_id: int) -> Tuple[bool, str, Optional[dict]]:
+        code = normalize_ticket_code(code)
+        if not code:
+            return False, "Please enter a code", None
         try:
             response = requests.post(
                 f"{self.server_url}/api/sessions/authenticate",
